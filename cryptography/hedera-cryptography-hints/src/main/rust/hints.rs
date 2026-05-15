@@ -233,7 +233,7 @@ impl HinTS {
     ) -> Result<ExtendedPublicKey, HinTSError> {
         // let us first perform sanity checks on the input
 
-        // we require n to be a power of 2
+        // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(n) {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
@@ -330,7 +330,7 @@ impl HinTS {
     ) -> Result<bool, HinTSError> {
         // sanity check on the inputs
 
-        // we require n to be a power of 2
+        // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(n) {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
@@ -435,7 +435,7 @@ impl HinTS {
     ) -> Result<(VerificationKey, AggregationKey), HinTSError> {
         // sanity check on the inputs
 
-        // we require n to be a power of 2
+        // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(n) {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
@@ -465,7 +465,7 @@ impl HinTS {
                         format!("Invalid hint: hint verification failed for i = {}", i))
                     );
                 }
-                weights.push(weight.clone());
+                weights.push(*weight);
                 epks.push(hint.clone());
             } else {
                 weights.push(F::from(0));
@@ -544,6 +544,11 @@ impl HinTS {
         party_id: usize,
         sig: &PartialSignature
     ) -> Result<bool, HinTSError> {
+        // we require n to be a power of 2, greater than 1
+        if !utils::is_n_valid(ak.n) {
+            return Err(HinTSError::InvalidNetworkSize(ak.n));
+        }
+
         // party_id can only be between 0 and n-2, inclusive
         if party_id >= ak.n - 1 { // usize ensures non-negative
             return Err(HinTSError::InvalidInput(
@@ -563,6 +568,11 @@ impl HinTS {
         signer_ids: impl AsRef<[usize]>,
         signatures: impl AsRef<[PartialSignature]>,
     ) -> Result<bool, HinTSError> {
+        // we require n to be a power of 2, greater than 1
+        if !utils::is_n_valid(ak.n) {
+            return Err(HinTSError::InvalidNetworkSize(ak.n));
+        }
+
         // check that the two lists are of the same size
         if signer_ids.as_ref().len() != signatures.as_ref().len() {
             return Err(HinTSError::InvalidInput(

@@ -235,6 +235,14 @@ impl<C: CurveGroup + Hash> ThresholdSchnorr<C> where C::ScalarField: PrimeField,
         round2_messages: &[ThresholdSchnorrMessage2<C>],
         round3_messages: &[ThresholdSchnorrMessage3<C>],
     ) -> Result<Signature<C>, ThresholdSchnorrError> {
+        let n = public_keys.len();
+        if round1_messages.len() != n
+            || round2_messages.len() != n
+            || round3_messages.len() != n
+        {
+            return Err(ThresholdSchnorrError::InvalidInput);
+        }
+
         let aggregate_pk = public_keys.iter().fold(C::Affine::zero(), |acc, pk| (acc + pk).into_affine());
 
         let verifier_challenge = Self::compute_challenge(parameters, round1_messages, round2_messages, &aggregate_pk, message_to_sign)?;

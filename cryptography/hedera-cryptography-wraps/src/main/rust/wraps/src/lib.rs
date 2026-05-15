@@ -1609,4 +1609,32 @@ mod tests {
         assert_eq!(pok1.challenge, pok2.challenge);
         assert_eq!(pok1.response, pok2.response);
     }
+
+    #[test]
+    fn threshold_schnorr_subset_signs_and_aggregates() {
+        let (ab, keys) = create_new_addressbook();
+        let bitvector = sufficient_bitvector(&ab);
+
+        // The bitvector must select a strict, non-empty subset of the AddressBook,
+        // otherwise this test would not actually exercise threshold signing.
+        let signers = bitvector.iter().filter(|b| **b).count();
+        assert!(
+            signers > 0 && signers < ab.len(),
+            "expected a strict, non-empty signing subset, got {}/{}",
+            signers,
+            ab.len()
+        );
+
+        let message: &[u8] = b"threshold schnorr subset signing";
+
+        // Run R1 -> R2 -> R3 -> Aggregate over the chosen subset.
+        let multi_signature = threshold_sign(message, &ab, &keys, &bitvector);
+
+        // The aggregated signature must verify against the full AddressBook
+        // (verify_signature reconstructs the aggregate pk from the bitvector).
+        assert!(
+            WRAPS::verify_signature(&ab, message, &multi_signature).unwrap(),
+            "aggregated threshold Schnorr signature failed to verify",
+        );
+    }
 }

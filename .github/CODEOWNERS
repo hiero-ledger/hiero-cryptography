@@ -7,12 +7,12 @@
 #########################
 ####   Java Modules  ####
 #########################
-/cryptography/                                          @hiero-cryptography-maintainers
-/common/                                                @hiero-cryptography-maintainers
+/cryptography/                                          @hiero-ledger/hiero-cryptography-maintainers
+/common/                                                @hiero-ledger/hiero-cryptography-maintainers
 
-/hedera-bls-api                                         @hiero-cryptography-maintainers
-/hedera-bls-impl                                        @hiero-cryptography-maintainers
-/hedera-bls-rust-jni                                    @hiero-cryptography-maintainers
+/hedera-bls-api                                         @hiero-ledger/hiero-cryptography-maintainers
+/hedera-bls-impl                                        @hiero-ledger/hiero-cryptography-maintainers
+/hedera-bls-rust-jni                                    @hiero-ledger/hiero-cryptography-maintainers
 
 #########################
 #####  Core Files  ######
@@ -33,7 +33,7 @@ gradlew                                                 @hiero-ledger/github-mai
 gradlew.bat                                             @hiero-ledger/github-maintainers
 **/build-logic/                                         @hiero-ledger/github-maintainers
 **/gradle.*                                             @hiero-ledger/github-maintainers
-**/*.gradle.*                                           @hiero-ledger/github-maintainers @hiero-cryptography-maintainers
+**/*.gradle.*                                           @hiero-ledger/github-maintainers @hiero-ledger/hiero-cryptography-maintainers
 
 # Codacy Tool Configurations
 /config/                                                @hiero-ledger/github-maintainers
@@ -43,7 +43,7 @@ gradlew.bat                                             @hiero-ledger/github-mai
 /CODEOWNERS                                             @hiero-ledger/github-maintainers
 
 # Protect the repository root files
-/README.md                                              @hiero-ledger/github-maintainers @hiero-cryptography-maintainers
+/README.md                                              @hiero-ledger/github-maintainers @hiero-ledger/hiero-cryptography-maintainers
 **/LICENSE                                              @hiero-ledger/github-maintainers
 
 # CodeCov configuration

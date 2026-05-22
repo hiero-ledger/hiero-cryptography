@@ -1,9 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
 version: 2
 updates:
   - package-ecosystem: gradle
     directory: "/hiero-dependency-versions"
     schedule:
       interval: weekly
+    assignees:
+      - "swirlds-automation"
+    labels:
+      - "dependencies"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 10
     groups:
       all-dependencies:
@@ -14,6 +21,12 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    assignees:
+      - "swirlds-automation"
+    labels:
+      - "dependencies"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 10
     groups:
       all-dependencies:
@@ -24,6 +37,12 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    assignees:
+      - "swirlds-automation"
+    labels:
+      - "dependencies"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 10
     groups:
       all-actions:

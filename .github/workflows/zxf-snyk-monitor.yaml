@@ -55,7 +55,7 @@ jobs:
       # (empty) build.gradle.kts in the root folder.
       - name: Disable Gradle Configuration Cache
         run: |
-          sed -i 's/^org.gradle.configuration-cache=.*$/org.gradle.configuration-cache=false/' gradle.properties
+          sed -i 's/^org.gradle.unsafe.isolated-projects=.*$/org.gradle.unsafe.isolated-projects=false/' gradle.properties
           touch build.gradle.kts
 
       # This step is what actually uploads the Snyk analysis to the Snyk Cloud. The Snyk token is stored as a secret

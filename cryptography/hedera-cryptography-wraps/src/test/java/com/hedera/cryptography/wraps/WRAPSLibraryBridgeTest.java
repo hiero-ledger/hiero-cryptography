@@ -816,7 +816,7 @@ public class WRAPSLibraryBridgeTest {
         assertNull(WRAPS.formatRotationMessage(keys, weights, nodeIds, new byte[0]));
     }
 
-    // @Test
+    @Test
     public void testConstructWrapsProof() {
         if (!WRAPSLibraryBridge.isProofSupported()) {
             // Gradle script will download artifacts and set TSS_LIB_WRAPS_ARTIFACTS_PATH to bypass this.

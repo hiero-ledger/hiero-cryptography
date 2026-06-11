@@ -6,21 +6,20 @@ The general handling of Maintainer rights and all groups in this GitHub org is d
 
 Maintainers are assigned the following scopes in this repository:
 
-|        Scope        |            Definition             | GitHub Role |            GitHub Team             |
-|---------------------|-----------------------------------|-------------|------------------------------------|
-| project-maintainers | The Maintainers of the project    | Maintain    | `hiero-consensus-node-maintainers` |
-| tsc                 | The Hiero TSC                     | Maintain    | `tsc`                              |
-| github-maintainers  | The Maintainers of the github org | Maintain    | `github-maintainers`               |
+|        Scope        |            Definition             | GitHub Role |           GitHub Team            |
+|---------------------|-----------------------------------|-------------|----------------------------------|
+| project-maintainers | The Maintainers of the project    | Maintain    | `hiero-cryptography-maintainers` |
+| tsc                 | The Hiero TSC                     | Maintain    | `tsc`                            |
+| github-maintainers  | The Maintainers of the github org | Maintain    | `github-maintainers`             |
 
 ## Active Maintainers
 
-|         Name          |     GitHub ID       | Scope | LFID | Discord ID | Email | Company Affiliation |
-|-----------------------|---------------------|-------|------|------------|-------|---------------------|
-| Anthony Petrov        | anthony-swirldslabs |       |      |            |       | Hashgraph           |
-| Rohit Sinha           | rsinha              |       |      |            |       | Hashgraph           |
-| Pratyay Mukherjee     | pratyay85           |       |      |            |       | Hashgraph           |
-| Jeffrey Morgan        | Jeffrey-morgan34    |       |      |            |       | Hashgraph           |
-
+|       Name        |      GitHub ID      | Scope | LFID | Discord ID | Email | Company Affiliation |
+|-------------------|---------------------|-------|------|------------|-------|---------------------|
+| Anthony Petrov    | anthony-swirldslabs |       |      |            |       | Hashgraph           |
+| Rohit Sinha       | rsinha              |       |      |            |       | Hashgraph           |
+| Pratyay Mukherjee | pratyay85           |       |      |            |       | Hashgraph           |
+| Jeffrey Morgan    | Jeffrey-morgan34    |       |      |            |       | Hashgraph           |
 
 ## Emeritus Maintainers
 

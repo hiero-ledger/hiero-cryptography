@@ -64,6 +64,12 @@ jobs:
       - name: Build Cargo Darwin
         run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin
 
+      - name: Build libsodium darwin-arm64
+        run: ./gradlew :libsodium:build
+
+      - name: Build libsodium darwin-amd64
+        run: HIERO_LIBSODIUM_TARGET=darwin-amd64 HIERO_LIBSODIUM_CONFIGURE_HOST=x86_64-apple-darwin ./gradlew :libsodium:assemble
+
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
     runs-on: hl-crypto-lin-md
@@ -112,6 +118,15 @@ jobs:
 
       - name: Build Cargo Linux / Windows
         run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows
+
+      - name: Build libsodium linux-amd64
+        run: ./gradlew :libsodium:build
+
+      - name: Build libsodium linux-arm64
+        run: HIERO_LIBSODIUM_TARGET=linux-arm64 HIERO_LIBSODIUM_CONFIGURE_HOST=aarch64-linux-gnu ./gradlew :libsodium:assemble
+
+      - name: Build libsodium windows-amd64
+        run: HIERO_LIBSODIUM_TARGET=windows-amd64 HIERO_LIBSODIUM_CONFIGURE_HOST=x86_64-w64-mingw32 ./gradlew :libsodium:assemble
 
   build:
     name: Build TSS Crypto Library

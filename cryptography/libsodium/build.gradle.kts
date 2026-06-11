@@ -5,11 +5,10 @@ import org.hiero.gradle.tasks.GitClone
 
 plugins { id("org.hiero.gradle.module.library") }
 
-val srcDir = layout.buildDirectory.dir("libsodium")
-val dstDir = layout.buildDirectory.dir("resources/main/com/hedera/nativelib/libsodium")
+val libDir = layout.buildDirectory.dir("libsodium")
 
 tasks.register<GitClone>("cloneLibsodium") {
-    localCloneDirectory = srcDir
+    localCloneDirectory = libDir
     url = "https://github.com/jedisct1/libsodium.git"
     // branch = "master"
     tag = "1.0.22-RELEASE"
@@ -22,8 +21,11 @@ interface Injected {
 
 tasks.assemble {
     val injected = objects.newInstance(Injected::class.java)
-    val execOps = injected.execOps
-    val files = injected.files
+
+    val srcDir = libDir.get()
+    val makefileExists = file(srcDir.file("Makefile")).exists()
+    val buildDir = libDir.get().dir("src/libsodium/.libs")
+    val dstDir = layout.buildDirectory.dir("resources/main/com/hedera/nativelib/libsodium")
 
     dependsOn("cloneLibsodium")
 
@@ -70,36 +72,38 @@ tasks.assemble {
             .get()
     val targetOsArch = target.split(Pattern.compile("-"), 2)
 
+    val hieroLibsodiumConfigureHost =
+        providers.environmentVariable("HIERO_LIBSODIUM_CONFIGURE_HOST").orElse("").get()
+
     doFirst {
         // Clean everything first. Useful for subsequent cross-platform builds in the same local
         // repo, e.g. in CI.
-        if (file(srcDir.get().file("Makefile")).exists()) {
-            execOps.exec {
+        if (makefileExists) {
+            injected.execOps.exec {
                 workingDir(srcDir)
                 commandLine("make", "clean")
             }
         }
 
-        execOps.exec {
+        injected.execOps.exec {
             val cmd = mutableListOf("sh", "./configure")
-            if (providers.environmentVariable("HIERO_LIBSODIUM_CONFIGURE_HOST").isPresent) {
+            if (hieroLibsodiumConfigureHost != "") {
                 // ./configure calls target a "host", so:
                 cmd.add("--host")
-                cmd.add(providers.environmentVariable("HIERO_LIBSODIUM_CONFIGURE_HOST").get())
+                cmd.add(hieroLibsodiumConfigureHost)
             }
 
             workingDir(srcDir)
             commandLine(cmd)
         }
 
-        execOps.exec {
+        injected.execOps.exec {
             workingDir(srcDir)
             commandLine("make")
         }
 
         // Copy the lib to the resources
         val targetDir = dstDir.get().dir(targetOsArch[0]).dir(targetOsArch[1])
-        val buildDir = srcDir.get().dir("src/libsodium/.libs")
         val libExt =
             if (targetOsArch[0].contains("linux")) {
                 "so"
@@ -112,8 +116,8 @@ tasks.assemble {
         // It has something to do with ABI version or maybe something else.
         val filename = "libsodium?26.${libExt}"
         println("Copy $filename from $buildDir/ to $targetDir/")
-        files.mkdir(targetDir)
-        files.sync {
+        injected.files.mkdir(targetDir)
+        injected.files.sync {
             from(buildDir)
             into(targetDir)
 

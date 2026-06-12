@@ -117,14 +117,43 @@ tasks.assemble {
         val filename = "libsodium?26.${libExt}"
         println("Copy $filename from $buildDir/ to $targetDir/")
         injected.files.mkdir(targetDir)
+        println("Source: ${buildDir.asFile.absolutePath}")
+        injected.execOps.exec {
+            workingDir(srcDir)
+            commandLine("ls", "-l", buildDir.asFile.absolutePath)
+        }
+        println("-----")
+        println("Before: ${targetDir.asFile.absolutePath}")
+        injected.execOps.exec {
+            workingDir(srcDir)
+            commandLine("ls", "-l", targetDir.asFile.absolutePath)
+        }
+        println("-----")
         injected.files.sync {
             from(buildDir)
             into(targetDir)
 
             include(filename)
 
+            eachFile {
+                println("   dn $displayName")
+                println("   name $name")
+                println("   path $path")
+                println("   sn $sourceName")
+                println("   sp $sourcePath")
+                println("   rp ${relativePath.pathString}")
+                println("   rsp ${relativeSourcePath.pathString}")
+            }
+
             // Remove the "-/.26" suffix because we don't need it.
             rename { name -> name.replace(".26", "").replace("-26", "") }
         }
+        println("Finished copying files.")
+        println("After: ${targetDir.asFile.absolutePath}")
+        injected.execOps.exec {
+            workingDir(srcDir)
+            commandLine("ls", "-l", targetDir.asFile.absolutePath)
+        }
+        println("-----")
     }
 }

@@ -114,7 +114,7 @@ tasks.assemble {
             }
         // libsodium native build adds a "-/.26" suffix to the lib name.
         // It has something to do with ABI version or maybe something else.
-        val filename = "libsodium?26.${libExt}"
+        val filename = listOf("libsodium?26.${libExt}", "libsodium.${libExt}.26")
         println("Copy $filename from $buildDir/ to $targetDir/")
         injected.files.mkdir(targetDir)
         println("Source: ${buildDir.asFile.absolutePath}")

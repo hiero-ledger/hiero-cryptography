@@ -112,47 +112,27 @@ tasks.assemble {
             } else { // Windows
                 "dll"
             }
-        // libsodium native build adds a "-/.26" suffix to the lib name.
+        // libsodium native build adds a "-/.26" suffix/infix to the lib name.
         // It has something to do with ABI version or maybe something else.
         val filename = listOf("libsodium?26.${libExt}", "libsodium.${libExt}.26")
         println("Copy $filename from $buildDir/ to $targetDir/")
         injected.files.mkdir(targetDir)
-        println("Source: ${buildDir.asFile.absolutePath}")
-        injected.execOps.exec {
-            workingDir(srcDir)
-            commandLine("ls", "-l", buildDir.asFile.absolutePath)
-        }
-        println("-----")
-        println("Before: ${targetDir.asFile.absolutePath}")
-        injected.execOps.exec {
-            workingDir(srcDir)
-            commandLine("ls", "-l", targetDir.asFile.absolutePath)
-        }
-        println("-----")
         injected.files.sync {
             from(buildDir)
             into(targetDir)
 
             include(filename)
 
-            eachFile {
-                println("   dn $displayName")
-                println("   name $name")
-                println("   path $path")
-                println("   sn $sourceName")
-                println("   sp $sourcePath")
-                println("   rp ${relativePath.pathString}")
-                println("   rsp ${relativeSourcePath.pathString}")
-            }
+            eachFile { println("   Copying: $displayName") }
 
             // Remove the "-/.26" suffix because we don't need it.
             rename { name -> name.replace(".26", "").replace("-26", "") }
         }
         println("Finished copying files.")
-        println("After: ${targetDir.asFile.absolutePath}")
+        println("Destination listing so far: ${dstDir.get().asFile.absolutePath}")
         injected.execOps.exec {
             workingDir(srcDir)
-            commandLine("ls", "-l", targetDir.asFile.absolutePath)
+            commandLine("ls", "-lR", dstDir.get().asFile.absolutePath)
         }
         println("-----")
     }

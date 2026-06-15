@@ -30,13 +30,13 @@ public class NativeLibrary extends NativeBinary {
     /**
      * Default extensions for binary libraries per OS
      */
-    private static final Map<OperatingSystem, String> DEFAULT_LIB_EXTENSIONS =
+    public static final Map<OperatingSystem, String> DEFAULT_LIB_EXTENSIONS =
             Map.of(OperatingSystem.WINDOWS, "dll", OperatingSystem.LINUX, "so", OperatingSystem.DARWIN, "dylib");
 
     /**
      * Default prefix for binary libraries per OS
      */
-    private static final Map<OperatingSystem, String> DEFAULT_LIB_PREFIXES =
+    public static final Map<OperatingSystem, String> DEFAULT_LIB_PREFIXES =
             Map.of(OperatingSystem.WINDOWS, "", OperatingSystem.LINUX, "lib", OperatingSystem.DARWIN, "lib");
 
     /**

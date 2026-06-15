@@ -5,6 +5,17 @@ import org.hiero.gradle.tasks.GitClone
 
 plugins { id("org.hiero.gradle.module.library") }
 
+testModuleInfo { requires("org.junit.jupiter.api") }
+
+tasks.test {
+    // It's a bit odd why test doesn't depend on assemble by default...
+    dependsOn("assemble")
+
+    jvmArgs(
+        "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsodium"
+    )
+}
+
 val libDir = layout.buildDirectory.dir("libsodium")
 
 tasks.register<GitClone>("cloneLibsodium") {

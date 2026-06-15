@@ -11,7 +11,6 @@ import java.util.Map;
  * Handles loading of foreign binary libraries from within a JAR file based on operating system and architecture
  * for use with Java FFM APIs.
  * <p>
- * <p>
  * Example usage:
  * <pre>
  * {@code

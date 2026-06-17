@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import java.util.regex.Pattern
 import org.gradle.api.internal.file.FileOperations
+import org.gradle.internal.extensions.stdlib.capitalized
+import org.gradle.kotlin.dsl.register
 import org.hiero.gradle.tasks.GitClone
 
 plugins { id("org.hiero.gradle.module.library") }
@@ -8,14 +9,12 @@ plugins { id("org.hiero.gradle.module.library") }
 testModuleInfo { requires("org.junit.jupiter.api") }
 
 tasks.test {
-    // It's a bit odd why test doesn't depend on assemble by default...
-    dependsOn("assemble")
-
     jvmArgs(
         "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsodium"
     )
 }
 
+/// Where we check out the libsodium repo from GitHub into the local build/ directory:
 val libDir = layout.buildDirectory.dir("libsodium")
 
 tasks.register<GitClone>("cloneLibsodium") {
@@ -25,110 +24,63 @@ tasks.register<GitClone>("cloneLibsodium") {
     tag = "1.0.22-RELEASE"
 }
 
-interface Injected {
-    @get:Inject val execOps: ExecOperations
-    @get:Inject val files: FileOperations
-}
+abstract class BuildLibsodiumTask : DefaultTask() {
+    @get:Inject protected abstract val execOps: ExecOperations
+    @get:Inject protected abstract val files: FileOperations
 
-tasks.assemble {
-    val injected = objects.newInstance(Injected::class.java)
+    /// Where the native library repo is checked out via GitClone. Must contain ./configure.
+    /// Likely build/<name>/.
+    @get:InputDirectory abstract val libraryDir: DirectoryProperty
 
-    val srcDir = libDir.get()
-    val makefileExists = file(srcDir.file("Makefile")).exists()
-    val buildDir = libDir.get().dir("src/libsodium/.libs")
-    val dstDir = layout.buildDirectory.dir("resources/main/com/hedera/nativelib/libsodium")
+    /// ./configure --host ... string, or a blank string to omit the --host arg.
+    @get:Input abstract val configureHost: Property<String>
 
-    dependsOn("cloneLibsodium")
+    /// Where the binary library to be written.
+    // Likely build/resources/main/com/hedera/nativelib/<name>/<os>/<arch>/.
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
 
-    // HIERO_LIBSODIUM_TARGET=os-arch
-    // where os is linux, darwin, or windows, and arch is amd64 or arm64
-    // Example: HIERO_LIBSODIUM_TARGET=darwin-amd64
-    // By default, assume we build for the host target and infer the value of HIERO_LIBSODIUM_TARGET
-    // accordingly. If HIERO_LIBSODIUM_TARGET env var is defined explicitly, then the caller should
-    // probably also define HIERO_LIBSODIUM_CONFIGURE_HOST to let ./configure --host ... choose the
-    // correct toolchain. The caller may also define CFLAGS, CC, AR, and whatever else if needed.
-    // For example, to build for Windows target (e.g. on a Mac host) run:
-    // HIERO_LIBSODIUM_TARGET=windows-amd64 HIERO_LIBSODIUM_CONFIGURE_HOST=x86_64-w64-mingw32
-    // ./gradlew assemble
-    val target =
-        providers
-            .environmentVariable("HIERO_LIBSODIUM_TARGET")
-            .orElse(
-                providers.provider {
-                    val hostOperatingSystem =
-                        System.getProperty("os.name").lowercase().let {
-                            if (it.contains("windows")) {
-                                "windows"
-                            } else if (it.contains("mac")) {
-                                "darwin"
-                            } else {
-                                "linux"
-                            }
-                        }
-                    val hostArchitecture =
-                        System.getProperty("os.arch").let {
-                            if (it.contains("x86_64")) {
-                                "amd64"
-                            } else if (it.contains("aarch64")) {
-                                "arm64"
-                            } else {
-                                // There's "386" and "armv6l" at https://go.dev/dl/ .
-                                it
-                            }
-                        }
-
-                    "${hostOperatingSystem}-${hostArchitecture}"
-                }
-            )
-            .get()
-    val targetOsArch = target.split(Pattern.compile("-"), 2)
-
-    val hieroLibsodiumConfigureHost =
-        providers.environmentVariable("HIERO_LIBSODIUM_CONFIGURE_HOST").orElse("").get()
-
-    doFirst {
+    @TaskAction
+    fun action() {
         // Clean everything first. Useful for subsequent cross-platform builds in the same local
         // repo, e.g. in CI.
+        val makefileExists = files.file(libraryDir.file("Makefile")).exists()
         if (makefileExists) {
-            injected.execOps.exec {
-                workingDir(srcDir)
+            execOps.exec {
+                workingDir(libraryDir)
                 commandLine("make", "clean")
             }
         }
 
-        injected.execOps.exec {
+        execOps.exec {
             val cmd = mutableListOf("sh", "./configure")
-            if (hieroLibsodiumConfigureHost != "") {
+            if (configureHost.get() != "") {
                 // ./configure calls target a "host", so:
                 cmd.add("--host")
-                cmd.add(hieroLibsodiumConfigureHost)
+                cmd.add(configureHost.get())
             }
 
-            workingDir(srcDir)
+            workingDir(libraryDir)
             commandLine(cmd)
         }
 
-        injected.execOps.exec {
-            workingDir(srcDir)
+        execOps.exec {
+            workingDir(libraryDir)
             commandLine("make")
         }
 
         // Copy the lib to the resources
-        val targetDir = dstDir.get().dir(targetOsArch[0]).dir(targetOsArch[1])
-        val libExt =
-            if (targetOsArch[0].contains("linux")) {
-                "so"
-            } else if (targetOsArch[0].contains("darwin")) {
-                "dylib"
-            } else { // Windows
-                "dll"
-            }
+        val libExts = listOf("so", "dylib", "dll")
         // libsodium native build adds a "-/.26" suffix/infix to the lib name.
         // It has something to do with ABI version or maybe something else.
-        val filename = listOf("libsodium?26.${libExt}", "libsodium.${libExt}.26")
+        val filename =
+            libExts
+                .flatMap { libExt -> listOf("libsodium?26.${libExt}", "libsodium.${libExt}.26") }
+                .toList()
+        val buildDir = libraryDir.get().dir("src/libsodium/.libs")
+        val targetDir = outputDir.get()
         println("Copy $filename from $buildDir/ to $targetDir/")
-        injected.files.mkdir(targetDir)
-        injected.files.sync {
+        files.mkdir(targetDir)
+        files.sync {
             from(buildDir)
             into(targetDir)
 
@@ -140,11 +92,105 @@ tasks.assemble {
             rename { name -> name.replace(".26", "").replace("-26", "") }
         }
         println("Finished copying files.")
-        println("Destination listing so far: ${dstDir.get().asFile.absolutePath}")
-        injected.execOps.exec {
-            workingDir(srcDir)
-            commandLine("ls", "-lR", dstDir.get().asFile.absolutePath)
-        }
+        // The output dir w/o the os/arch/ path to print everything we have so far:
+        val resourcesDir = outputDir.get().file("../..").asFile.absolutePath
+        println("Destination listing so far: $resourcesDir")
+        execOps.exec { commandLine("ls", "-lR", resourcesDir) }
         println("-----")
+    }
+}
+
+/// A descriptor for a native target
+data class NativeTarget(val os: String, val arch: String, val configureHost: String) {}
+
+// HIERO_LIBSODIUM_TARGETS env var can be defined to cross-build for different platforms.
+// If undefined, only a build for the local host target will be performed.
+// Example:
+//
+// HIERO_LIBSODIUM_TARGETS="darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
+//
+// This is a semicolon-separated list of target definitions. Each definition starts with a target
+// name in the form of os-arch, where os is linux, darwin, or windows, and arch is amd64 or arm64.
+// The target definition can optionally be followed by a comma and a ./configure --host ...
+// value that will be passed to the ./configure script to use a proper toolchain for cross-
+// compilation. If the host value is missing, then ./configure will be invoked w/o any parameters,
+// assuming a local host build for the local host target (i.e. no cross-compilation.)
+//
+// Each defined target will result in creating a :libsodium:buildLibsodium<Os><Arch> Gradle task
+// where <Os> and <Arch> will be capitalized versions of the os and arch from the target name.
+//
+// The :libsodium:compile[Test]Java targets will take a dependency on the local host target build
+// task only. This is to ensure that unit tests can access a local host target-built native library.
+//
+// The jar task takes a dependency on all the buildLibsodium tasks for all targets.
+// This is to ensure that the published artifact in CI has native libraries for all supported
+// platforms.
+//
+// Individual GitHub CI runner tasks could build specific targets on specific hosts (e.g. darwin on
+// Mac) and the Gradle Cache will take care of aggregating all the results when assembling the final
+// artifact to be published to Maven.
+val hostOperatingSystem =
+    System.getProperty("os.name").lowercase().let {
+        if (it.contains("windows")) {
+            "windows"
+        } else if (it.contains("mac")) {
+            "darwin"
+        } else {
+            "linux"
+        }
+    }
+val hostArchitecture =
+    System.getProperty("os.arch").let {
+        if (it.contains("x86_64")) {
+            "amd64"
+        } else if (it.contains("aarch64")) {
+            "arm64"
+        } else {
+            // There's "386" and "armv6l" at https://go.dev/dl/ .
+            it
+        }
+    }
+
+val targets =
+    providers
+        .environmentVariable("HIERO_LIBSODIUM_TARGETS")
+        .map { targetsString ->
+            targetsString
+                .split(";")
+                .map { targetDef ->
+                    val targetDefParts = targetDef.split(",")
+                    val osArch = targetDefParts[0].split("-")
+                    NativeTarget(
+                        osArch[0],
+                        osArch[1],
+                        if (targetDefParts.size > 1) targetDefParts[1] else "",
+                    )
+                }
+                .toList()
+        }
+        .orElse(listOf(NativeTarget(hostOperatingSystem, hostArchitecture, "")))
+        .get()
+
+targets.forEach { target ->
+    val name = "buildLibsodium" + target.os.capitalized() + target.arch.capitalized()
+    println("Registering $name per $target")
+    val task =
+        tasks.register<BuildLibsodiumTask>(name) {
+            dependsOn("cloneLibsodium")
+            libraryDir = libDir
+            configureHost = target.configureHost
+            outputDir =
+                layout.buildDirectory.dir(
+                    "resources/main/com/hedera/nativelib/libsodium/${target.os}/${target.arch}"
+                )
+        }
+
+    // Include all built native libraries into the .jar:
+    tasks.jar { from(task) }
+
+    // If we run unit tests on the host platform, then we need the library available:
+    if (target.os == hostOperatingSystem && target.arch == hostArchitecture) {
+        tasks.compileJava { dependsOn(name) }
+        tasks.compileTestJava { dependsOn(name) }
     }
 }

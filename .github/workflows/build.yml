@@ -30,6 +30,8 @@ env:
   GRADLE_CACHE_USERNAME: ${{ secrets.GRADLE_CACHE_USERNAME }}
   GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
   CG_EXEC: ionice -c 2 -n 2 nice -n 19
+  # HIERO_LIBSODIUM_TARGETS is replicated in at least two other workflows, and all the definitions must match:
+  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
   build_rust_macos:
@@ -61,14 +63,8 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: Build Cargo Darwin
-        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin
-
-      - name: Build libsodium darwin-arm64
-        run: ./gradlew :libsodium:build
-
-      - name: Build libsodium darwin-amd64
-        run: HIERO_LIBSODIUM_TARGET=darwin-amd64 HIERO_LIBSODIUM_CONFIGURE_HOST=x86_64-apple-darwin ./gradlew :libsodium:assemble
+      - name: Build Native Libraries for Darwin
+        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin :libsodium:buildLibsodiumDarwinArm64 :libsodium:buildLibsodiumDarwinAmd64 :libsodium:test
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
@@ -116,17 +112,8 @@ jobs:
           sudo apt-get -y install binutils-aarch64-linux-gnu
           sudo apt-get -y install mingw-w64
 
-      - name: Build Cargo Linux / Windows
-        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows
-
-      - name: Build libsodium linux-amd64
-        run: ./gradlew :libsodium:build
-
-      - name: Build libsodium linux-arm64
-        run: HIERO_LIBSODIUM_TARGET=linux-arm64 HIERO_LIBSODIUM_CONFIGURE_HOST=aarch64-linux-gnu ./gradlew :libsodium:assemble
-
-      - name: Build libsodium windows-amd64
-        run: HIERO_LIBSODIUM_TARGET=windows-amd64 HIERO_LIBSODIUM_CONFIGURE_HOST=x86_64-w64-mingw32 ./gradlew :libsodium:assemble
+      - name: Build Native Libraries for Linux / Windows
+        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows :libsodium:buildLibsodiumLinuxAmd64 :libsodium:buildLibsodiumLinuxArm64 :libsodium:buildLibsodiumWindowsAmd64 :libsodium:test
 
   build:
     name: Build TSS Crypto Library

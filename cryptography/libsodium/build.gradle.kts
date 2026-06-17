@@ -24,6 +24,14 @@ tasks.register<GitClone>("cloneLibsodium") {
     tag = "1.0.22-RELEASE"
 }
 
+// We cannot build from a single repo for multiple targets at once. So we limit parallelizm:
+abstract class TaskMutex : BuildService<BuildServiceParameters.None>
+
+val mutexService =
+    gradle.sharedServices.registerIfAbsent("taskMutex", TaskMutex::class.java) {
+        maxParallelUsages.set(1)
+    }
+
 abstract class BuildLibsodiumTask : DefaultTask() {
     @get:Inject protected abstract val execOps: ExecOperations
     @get:Inject protected abstract val files: FileOperations
@@ -176,6 +184,7 @@ targets.forEach { target ->
     println("Registering $name per $target")
     val task =
         tasks.register<BuildLibsodiumTask>(name) {
+            usesService(mutexService)
             dependsOn("cloneLibsodium")
             libraryDir = libDir
             configureHost = target.configureHost

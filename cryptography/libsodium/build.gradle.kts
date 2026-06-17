@@ -32,6 +32,7 @@ val mutexService =
         maxParallelUsages.set(1)
     }
 
+/// Builds a native library via ./configure && make and copies .so/.dylib/.dll to resources.
 abstract class BuildLibsodiumTask : DefaultTask() {
     @get:Inject protected abstract val execOps: ExecOperations
     @get:Inject protected abstract val files: FileOperations
@@ -197,9 +198,9 @@ targets.forEach { target ->
     // Include all built native libraries into the .jar:
     tasks.jar { from(task) }
 
-    // If we run unit tests on the host platform, then we need the library available:
-    if (target.os == hostOperatingSystem && target.arch == hostArchitecture) {
-        tasks.compileJava { dependsOn(name) }
-        tasks.compileTestJava { dependsOn(name) }
-    }
+    // The compile tasks must also depend on the native builds. Technically, only the local host
+    // target library is required, e.g. to run the code and/or unit tests locally.
+    // But Gradle requires all of them because they all make it into the resources/. So:
+    tasks.compileJava { dependsOn(name) }
+    tasks.compileTestJava { dependsOn(name) }
 }

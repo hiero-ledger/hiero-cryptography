@@ -204,3 +204,11 @@ targets.forEach { target ->
     tasks.compileJava { dependsOn(name) }
     tasks.compileTestJava { dependsOn(name) }
 }
+
+tasks.named<Jar>("jar") {
+    // Each native library goes into its own os/arch/ subdirectory, and our `ls -lR` proves it.
+    // However, Gradle still complains:
+    //    Entry libsodium.dylib is a duplicate but no duplicate handling strategy has been set.
+    // So we do this:
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}

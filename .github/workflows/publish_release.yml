@@ -67,6 +67,24 @@ jobs:
         with:
           gradle-version: wrapper
 
+      - name: Setup cross-build tools
+        # Make sure 'clang-cl' and 'llvm-lib' are installed for compiling crates with C++ code for Windows
+        # https://github.com/hiero-ledger/hiero-gradle-conventions/issues/97
+        # Also install g++-aarch64-linux-gnu because the compressor build via Rust/Go needs it.
+        # Finally, install mingw that we use to build for Windows target.
+        run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 15CF4D18AF4F7421
+          sudo add-apt-repository deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main
+          sudo apt-get update
+          sudo apt-get -y install clang-tools-19
+          sudo ln -s /usr/bin/clang-cl-19 /usr/bin/clang-cl
+          sudo ln -s /usr/bin/llvm-lib-19 /usr/bin/llvm-lib
+          clang-cl -v
+          llvm-lib -v
+          sudo apt-get -y install g++-aarch64-linux-gnu
+          sudo apt-get -y install binutils-aarch64-linux-gnu
+          sudo apt-get -y install mingw-w64
+
       - name: Install GnuPG Tools
         run: |
           if ! command -v gpg2 >/dev/null 2>&1; then

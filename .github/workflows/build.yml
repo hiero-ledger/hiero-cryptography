@@ -210,6 +210,13 @@ jobs:
         with:
           cache-read-only: false
 
+      - name: Setup cross-build tools
+        run: |
+          brew install mingw-w64
+          brew tap messense/macos-cross-toolchains
+          brew install x86_64-unknown-linux-gnu
+          brew install aarch64-unknown-linux-gnu
+
       - name: Gradle Unit Test
         # We do -PskipInstallRustToolchains=true, because all cargoBuild task results are taken FROM-CACHE
         run: ./gradlew test -PskipInstallRustToolchains=true --continue

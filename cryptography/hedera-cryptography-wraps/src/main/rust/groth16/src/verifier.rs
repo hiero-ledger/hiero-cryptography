@@ -62,7 +62,8 @@ impl<E: Pairing, QAP: R1CSToQAP> Groth16<E, QAP> {
             ],
         );
 
-        let test = E::final_exponentiation(qap).unwrap();
+        let test = E::final_exponentiation(qap)
+            .ok_or_else(|| SynthesisError::AssignmentMissing)?;
 
         Ok(test.0 == pvk.alpha_g1_beta_g2)
     }

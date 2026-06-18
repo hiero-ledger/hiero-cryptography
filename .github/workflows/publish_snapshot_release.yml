@@ -23,7 +23,7 @@ env:
   JAVA_DISTRIBUTION: temurin
   JAVA_VERSION: 25.0.2
   # HIERO_LIBSODIUM_TARGETS must match the definition in build.xml:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
+  HIERO_LIBSODIUM_TARGETS: "darwin-arm64,aarch64-apple-darwin;darwin-amd64,x86_64-apple-darwin;linux-amd64,x86_64-linux-gnu;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
   publish-maven-central:

@@ -31,7 +31,7 @@ env:
   GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
   CG_EXEC: ionice -c 2 -n 2 nice -n 19
   # HIERO_LIBSODIUM_TARGETS is replicated in at least two other workflows, and all the definitions must match:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64,aarch64-apple-darwin;darwin-amd64,x86_64-apple-darwin;linux-amd64,x86_64-linux-gnu;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
+  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
   build_rust_macos:
@@ -63,8 +63,8 @@ jobs:
         with:
           cache-read-only: false
 
-      - name: Build Cargo Darwin
-        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin
+      - name: Build Native Darwin
+        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
@@ -112,8 +112,8 @@ jobs:
           sudo apt-get -y install binutils-aarch64-linux-gnu
           sudo apt-get -y install mingw-w64
 
-      - name: Build Cargo Linux / Windows
-        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows
+      - name: Build Native Linux / Windows
+        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64
 
   build:
     name: Build TSS Crypto Library
@@ -142,24 +142,6 @@ jobs:
         uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5.0.0
         with:
           cache-read-only: false
-
-      - name: Setup cross-build tools
-        # Make sure 'clang-cl' and 'llvm-lib' are installed for compiling crates with C++ code for Windows
-        # https://github.com/hiero-ledger/hiero-gradle-conventions/issues/97
-        # Also install g++-aarch64-linux-gnu because the compressor build via Rust/Go needs it.
-        # Finally, install mingw that we use to build for Windows target.
-        run: |
-          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 15CF4D18AF4F7421
-          sudo add-apt-repository deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main
-          sudo apt-get update
-          sudo apt-get -y install clang-tools-19
-          sudo ln -s /usr/bin/clang-cl-19 /usr/bin/clang-cl
-          sudo ln -s /usr/bin/llvm-lib-19 /usr/bin/llvm-lib
-          clang-cl -v
-          llvm-lib -v
-          sudo apt-get -y install g++-aarch64-linux-gnu
-          sudo apt-get -y install binutils-aarch64-linux-gnu
-          sudo apt-get -y install mingw-w64
 
       - name: Build software
         run: ./gradlew -PskipInstallRustToolchains=true assemble
@@ -209,14 +191,6 @@ jobs:
         uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5.0.0
         with:
           cache-read-only: false
-
-      - name: Setup cross-build tools
-        run: |
-          brew install mingw-w64
-          brew tap messense/macos-cross-toolchains
-          brew trust messense/macos-cross-toolchains
-          brew install x86_64-unknown-linux-gnu
-          brew install aarch64-unknown-linux-gnu
 
       - name: Gradle Unit Test
         # We do -PskipInstallRustToolchains=true, because all cargoBuild task results are taken FROM-CACHE

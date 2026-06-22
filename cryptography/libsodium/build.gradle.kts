@@ -16,8 +16,11 @@ tasks.test {
 }
 
 /// Where we check out the libsodium repo from GitHub into the local build/ directory:
-val libRepositoryDir = layout.buildDirectory.dir("third-party/libsodium")
-val libOutputDir = layout.buildDirectory.dir("third-party/libsodium/output")
+/// Must end with "libsodium" or whatever name the GitHub repo has:
+val libRepositoryDir = layout.buildDirectory.dir("libsodium/input/libsodium")
+/// Where build tasks write output to:
+/// Must be outside of input/ above so that Gradle is happy:
+val libOutputDir = layout.buildDirectory.dir("libsodium/output")
 
 tasks.register<GitClone>("cloneLibsodium") {
     localCloneDirectory = libRepositoryDir

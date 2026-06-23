@@ -32,10 +32,11 @@ env:
   CG_EXEC: ionice -c 2 -n 2 nice -n 19
 
 jobs:
-  build_rust_macos:
-    # Build macOS Rust targets separately on a macOS runner to have access to macOS SDKs
-    name: Build Rust - macOS
-    runs-on: macos-14
+  read-build-targets:
+    name: Read Build Targets
+    runs-on: hl-crypto-lin-md
+    outputs:
+      libsodium-targets: ${{ steps.read.outputs.libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -45,12 +46,29 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - name: Read libsodium CI targets from build file
+      - name: Read libsodium CI targets from targets file
+        id: read
         run: |
-          TARGETS=$(grep 'HIERO_LIBSODIUM_TARGETS=' .github/workflows/support/.build-targets \
-            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
-          echo "Targets to build: ${TARGETS}"
-          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
+          source .github/workflows/support/.build-targets
+          echo "Targets to build: ${HIERO_LIBSODIUM_TARGETS}"
+          echo "libsodium-targets=${HIERO_LIBSODIUM_TARGETS}" >> "${GITHUB_OUTPUT}"
+
+  build_rust_macos:
+    # Build macOS Rust targets separately on a macOS runner to have access to macOS SDKs
+    name: Build Rust - macOS
+    needs:
+      - read-build-targets
+    runs-on: macos-14
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Install go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
@@ -73,7 +91,10 @@ jobs:
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
+    needs: read-build-targets
     runs-on: hl-crypto-lin-md
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -82,13 +103,6 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Read libsodium CI targets from build file
-        run: |
-          TARGETS=$(grep 'HIERO_LIBSODIUM_TARGETS=' .github/workflows/support/.build-targets \
-            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
-          echo "Targets to build: ${TARGETS}"
-          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Install go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
@@ -130,9 +144,12 @@ jobs:
   build:
     name: Build TSS Crypto Library
     needs:
+      - read-build-targets
       - build_rust_macos
       - build_rust_linux_windows
     runs-on: hl-crypto-lin-lg
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -143,13 +160,6 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
-
-      - name: Read libsodium CI targets from build file
-        run: |
-          TARGETS=$(grep 'HIERO_LIBSODIUM_TARGETS=' .github/workflows/support/.build-targets \
-            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
-          echo "Targets to build: ${TARGETS}"
-          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0
@@ -178,12 +188,16 @@ jobs:
 
   test-cross-platform:
     name: Test on ${{ matrix.os }}
-    needs: build
+    needs:
+      - read-build-targets
+      - build
     strategy:
       matrix:
         # removed windows from test as the windows build does not complete due to size of runner (2c/7gb RAM)
         os: [macos-14]
     runs-on: ${{ matrix.os }}
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -199,13 +213,6 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
-
-      - name: Read libsodium CI targets from build file
-        run: |
-          TARGETS=$(grep 'HIERO_LIBSODIUM_TARGETS=' .github/workflows/support/.build-targets \
-            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
-          echo "Targets to build: ${TARGETS}"
-          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0

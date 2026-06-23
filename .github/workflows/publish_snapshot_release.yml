@@ -24,9 +24,34 @@ env:
   JAVA_VERSION: 25.0.2
 
 jobs:
+  read-build-targets:
+    name: Read Build Targets
+    runs-on: hl-crypto-lin-md
+    outputs:
+      libsodium-targets: ${{ steps.read.outputs.libsodium-targets }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Read libsodium CI targets from targets file
+        id: read
+        run: |
+          source .github/workflows/support/.build-targets
+          echo "Targets to build: ${HIERO_LIBSODIUM_TARGETS}"
+          echo "libsodium-targets=${HIERO_LIBSODIUM_TARGETS}" >> "${GITHUB_OUTPUT}"
+
   publish-maven-central:
     name: Publish Maven Central
+    needs:
+      - read-build-targets
     runs-on: hl-crypto-lin-md
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -37,13 +62,6 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
-
-      - name: Read libsodium CI targets from build file
-        run: |
-          TARGETS=$(grep 'HIERO_LIBSODIUM_TARGETS=' .github/workflows/support/.build-targets \
-            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
-          echo "Targets to build: ${TARGETS}"
-          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0

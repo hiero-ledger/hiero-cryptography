@@ -49,6 +49,7 @@ jobs:
         run: |
           TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
             | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "Targets to build: ${TARGETS}"
           echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Install go
@@ -86,6 +87,7 @@ jobs:
         run: |
           TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
             | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "Targets to build: ${TARGETS}"
           echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Install go
@@ -146,6 +148,7 @@ jobs:
         run: |
           TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
             | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "Targets to build: ${TARGETS}"
           echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
@@ -201,6 +204,7 @@ jobs:
         run: |
           TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
             | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "Targets to build: ${TARGETS}"
           echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java

@@ -22,8 +22,6 @@ env:
   GRADLE_VERSION: wrapper
   JAVA_DISTRIBUTION: temurin
   JAVA_VERSION: 25.0.2
-  # HIERO_LIBSODIUM_TARGETS must match the definition in build.xml:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
   publish-maven-central:
@@ -39,6 +37,12 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
+
+      - name: Read libsodium CI targets from build file
+        run: |
+          TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
+            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0

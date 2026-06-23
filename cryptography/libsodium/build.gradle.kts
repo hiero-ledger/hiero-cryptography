@@ -125,7 +125,7 @@ data class NativeTarget(val os: String, val arch: String, val configureHost: Str
 
 // HIERO_LIBSODIUM_TARGETS env var can be defined to cross-build for different platforms.
 // If undefined, only a build for the local host target will be performed.
-// Example:
+// CI workflows derive the value from the following line (format must be: key="value"):
 //
 // HIERO_LIBSODIUM_TARGETS="darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 //

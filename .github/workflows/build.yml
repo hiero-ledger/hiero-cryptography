@@ -30,8 +30,6 @@ env:
   GRADLE_CACHE_USERNAME: ${{ secrets.GRADLE_CACHE_USERNAME }}
   GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
   CG_EXEC: ionice -c 2 -n 2 nice -n 19
-  # HIERO_LIBSODIUM_TARGETS is replicated in at least two other workflows, and all the definitions must match:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
   build_rust_macos:
@@ -46,6 +44,12 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Read libsodium CI targets from build file
+        run: |
+          TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
+            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Install go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
@@ -77,6 +81,12 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Read libsodium CI targets from build file
+        run: |
+          TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
+            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Install go
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
@@ -132,6 +142,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Read libsodium CI targets from build file
+        run: |
+          TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
+            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
+
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0
         with:
@@ -180,6 +196,12 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
+
+      - name: Read libsodium CI targets from build file
+        run: |
+          TARGETS=$(grep '// HIERO_LIBSODIUM_TARGETS=' cryptography/libsodium/build.gradle.kts \
+            | sed 's|.*HIERO_LIBSODIUM_TARGETS="\(.*\)"|\1|')
+          echo "HIERO_LIBSODIUM_TARGETS=${TARGETS}" >> "${GITHUB_ENV}"
 
       - name: Setup Java
         uses: actions/setup-java@f2beeb24e141e01a676f977032f5a29d81c9e27e # v5.1.0

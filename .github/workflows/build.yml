@@ -30,14 +30,22 @@ env:
   GRADLE_CACHE_USERNAME: ${{ secrets.GRADLE_CACHE_USERNAME }}
   GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
   CG_EXEC: ionice -c 2 -n 2 nice -n 19
-  # HIERO_LIBSODIUM_TARGETS is replicated in at least two other workflows, and all the definitions must match:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
+  read-build-targets:
+    name: Read Build Targets
+    uses: ./.github/workflows/855-call-extract-targets-and-libs.yaml
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   build_rust_macos:
     # Build macOS Rust targets separately on a macOS runner to have access to macOS SDKs
     name: Build Rust - macOS
+    needs:
+      - read-build-targets
     runs-on: macos-14
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -68,7 +76,10 @@ jobs:
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
+    needs: read-build-targets
     runs-on: hl-crypto-lin-md
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -118,9 +129,12 @@ jobs:
   build:
     name: Build TSS Crypto Library
     needs:
+      - read-build-targets
       - build_rust_macos
       - build_rust_linux_windows
     runs-on: hl-crypto-lin-lg
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -159,12 +173,16 @@ jobs:
 
   test-cross-platform:
     name: Test on ${{ matrix.os }}
-    needs: build
+    needs:
+      - read-build-targets
+      - build
     strategy:
       matrix:
         # removed windows from test as the windows build does not complete due to size of runner (2c/7gb RAM)
         os: [macos-14]
     runs-on: ${{ matrix.os }}
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

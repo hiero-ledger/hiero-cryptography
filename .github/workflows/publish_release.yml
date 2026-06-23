@@ -37,13 +37,21 @@ env:
   LC_ALL: C.UTF-8
   GRADLE_CACHE_USERNAME: ${{ secrets.GRADLE_CACHE_USERNAME }}
   GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
-  # HIERO_LIBSODIUM_TARGETS must match the definition in build.xml:
-  HIERO_LIBSODIUM_TARGETS: "darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
 
 jobs:
+  read-build-targets:
+    name: Read Build Targets
+    uses: ./.github/workflows/855-call-extract-targets-and-libs.yaml
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   create-github-release:
     name: Github / Release
+    needs:
+      - read-build-targets
     runs-on: hl-crypto-lin-md
+    env:
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

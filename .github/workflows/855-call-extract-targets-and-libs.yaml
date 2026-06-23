@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: "855: [CALL] Extract Build Targets and Libs"
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "The git ref to read .github/workflows/support/.build-targets from (branch, tag, or commit SHA)."
+        type: string
+        default: ""
+    secrets:
+      github-token:
+        required: true
+        description: "GitHub Authorization Token for the workflow"
+    outputs:
+      hiero-libsodium-targets:
+        value: ${{ jobs.extract-build-targets-libs.outputs.hiero-libsodium-targets }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  extract-build-targets-libs:
+    name: Extract Build Targets and Libraries
+    runs-on: hl-crypto-lin-md
+    outputs:
+      hiero-libsodium-targets: ${{ steps.get-targets-and-libs.outputs.hiero-libsodium-targets }}
+    steps:
+      - name: Initialize Job
+        uses: pandaswhocode/initialize-github-job@c392c3e699995ab6030915302d2fc9bffb1e861f # v1.1.0
+        with:
+          checkout: "true"
+          checkout-token: "${{ secrets.github-token }}"
+          checkout-ref: "${{ inputs.ref }}"
+          checkout-fetch-depth: "1"
+
+      - name: Get Targets and Libraries
+        id: get-targets-and-libs
+        run: |
+          echo "::group::Extract build targets and libraries from .build-targets"
+          ENV_FILE=".github/workflows/support/.build-targets"
+          if [[ ! -f "${ENV_FILE}" ]]; then
+            echo "::error::Environment file not found at ${ENV_FILE}"
+            exit 1
+          fi
+
+          while IFS='=' read -r key value; do
+            [[ -z "${key}" || "${key}" == \#* ]] && continue
+            echo "${key}=${value}" | tee -a "${GITHUB_OUTPUT}"
+          done < "${ENV_FILE}"
+          echo "::endgroup::"
+
+      - name: Verify Extracted Vars
+        if: ${{ steps.get-targets-and-libs.outputs.hiero-libsodium-targets == '' }}
+        run: |
+          echo "::error::One or more required variables are missing or empty. Please ensure .build-targets contains all necessary variables."
+          echo "::group::Extracted Variables"
+            echo "hiero-libsodium-targets: '${{ steps.get-targets-and-libs.outputs.hiero-libsodium-targets }}'"
+          echo "::endgroup::"
+          exit 1

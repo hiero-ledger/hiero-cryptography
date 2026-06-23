@@ -41,24 +41,9 @@ env:
 jobs:
   read-build-targets:
     name: Read Build Targets
-    runs-on: hl-crypto-lin-md
-    outputs:
-      libsodium-targets: ${{ steps.read.outputs.libsodium-targets }}
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout Code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Read libsodium CI targets from targets file
-        id: read
-        run: |
-          source .github/workflows/support/.build-targets
-          echo "Targets to build: ${HIERO_LIBSODIUM_TARGETS}"
-          echo "libsodium-targets=${HIERO_LIBSODIUM_TARGETS}" >> "${GITHUB_OUTPUT}"
+    uses: ./.github/workflows/855-call-extract-targets-and-libs.yaml
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 
   create-github-release:
     name: Github / Release
@@ -66,7 +51,7 @@ jobs:
       - read-build-targets
     runs-on: hl-crypto-lin-md
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.libsodium-targets }}
+      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

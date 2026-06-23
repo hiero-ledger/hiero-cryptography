@@ -1,1 +1,1 @@
-HIERO_LIBSODIUM_TARGETS="darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32"
+hiero-libsodium-targets=darwin-arm64;darwin-amd64,x86_64-apple-darwin;linux-amd64;linux-arm64,aarch64-linux-gnu;windows-amd64,x86_64-w64-mingw32

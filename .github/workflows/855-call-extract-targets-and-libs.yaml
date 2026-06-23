@@ -16,7 +16,6 @@ on:
       hiero-libsodium-targets:
         value: ${{ jobs.extract-build-targets-libs.outputs.hiero-libsodium-targets }}
 
-
 permissions:
   contents: read
 

@@ -10,4 +10,7 @@ dependencies.constraints {
     api("org.mockito:mockito-junit-jupiter:$mockito") { because("org.mockito.junit.jupiter") }
     api("org.bouncycastle:bcpkix-jdk18on:$bouncycastle") { because("org.bouncycastle.pkix") }
     api("org.bouncycastle:bcprov-jdk18on:$bouncycastle") { because("org.bouncycastle.provider") }
+
+    // Tests/JMH only:
+    api("com.goterl:lazysodium-java:5.2.0") { because("com.goterl.lazysodium") }
 }

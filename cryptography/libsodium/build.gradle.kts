@@ -5,7 +5,10 @@ import org.gradle.kotlin.dsl.register
 import org.hiero.gradle.services.TaskLockService
 import org.hiero.gradle.tasks.GitClone
 
-plugins { id("org.hiero.gradle.module.library") }
+plugins {
+    id("org.hiero.gradle.module.library")
+    id("org.hiero.gradle.feature.benchmark")
+}
 
 testModuleInfo { requires("org.junit.jupiter.api") }
 
@@ -13,6 +16,11 @@ tasks.test {
     jvmArgs(
         "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsodium"
     )
+}
+
+jmhModuleInfo {
+    requires("com.hedera.cryptography.libsodium")
+    requires("com.goterl.lazysodium")
 }
 
 /// Where we check out the libsodium repo from GitHub into the local build/ directory:

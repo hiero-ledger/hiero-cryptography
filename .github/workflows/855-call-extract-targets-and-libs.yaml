@@ -30,6 +30,11 @@ jobs:
     outputs:
       hiero-libsodium-targets: ${{ steps.get-targets-and-libs.outputs.hiero-libsodium-targets }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Initialize Job
         uses: pandaswhocode/initialize-github-job@c392c3e699995ab6030915302d2fc9bffb1e861f # v1.1.0
         with:

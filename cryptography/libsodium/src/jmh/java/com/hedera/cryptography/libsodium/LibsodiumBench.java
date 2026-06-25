@@ -18,6 +18,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.profile.GCProfiler;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
@@ -25,7 +26,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @SuppressWarnings("unused")
 @State(Scope.Benchmark)
 @Fork(3)
-@Warmup(iterations = 3, time = 2)
+@Warmup(iterations = 3)
 @Measurement(iterations = 5)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @BenchmarkMode(Mode.Throughput)
@@ -168,6 +169,7 @@ public class LibsodiumBench {
         Options opt = new OptionsBuilder()
                 .include(LibsodiumBench.class.getSimpleName())
                 .jvmArgs("--enable-native-access=ALL-UNNAMED")
+                .addProfiler(GCProfiler.class)
                 .build();
 
         new Runner(opt).run();

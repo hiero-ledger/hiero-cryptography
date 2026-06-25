@@ -26,10 +26,14 @@ public final class Libsodium {
         return InstanceHolder.INSTANCE;
     }
 
-    // Constants copied from lazysodium-java Sign.java:
-    private static final int ED25519_PUBLICKEYBYTES = 32;
-    private static final int ED25519_SECRETKEYBYTES = 64;
-    private static final int ED25519_BYTES = 64;
+    /// Public Key length.
+    public static final int ED25519_PUBLICKEYBYTES = 32;
+
+    /// Secret Key length.
+    public static final int ED25519_SECRETKEYBYTES = 64;
+
+    /// Signature length.
+    public static final int ED25519_BYTES = 64;
 
     // Handles for native functions
     private final MethodHandle cryptoSignKeypair;
@@ -88,8 +92,7 @@ public final class Libsodium {
     /// @param pk receives public key, must be 32 bytes long.
     /// @param sk receives secret key, must be 64 bytes long.
     /// @return 0 at all times (per the current libsodium implementation as of June 2026)
-    /// @throws Throwable if any exception occurs during the call to native code
-    public int cryptoSignKeypair(final MemorySegment pk, final MemorySegment sk) throws Throwable {
+    public int cryptoSignKeypair(final MemorySegment pk, final MemorySegment sk) {
         if (pk.byteSize() != ED25519_PUBLICKEYBYTES) {
             throw new IllegalArgumentException(
                     "pk must be " + ED25519_PUBLICKEYBYTES + " bytes long, got: " + pk.byteSize());
@@ -99,7 +102,11 @@ public final class Libsodium {
                     "sk must be " + ED25519_SECRETKEYBYTES + " bytes long, got: " + sk.byteSize());
         }
 
-        return cryptoSignKeypairNoChecks(pk, sk);
+        try {
+            return cryptoSignKeypairNoChecks(pk, sk);
+        } catch (Throwable t) {
+            throw new LibsodiumException(t);
+        }
     }
 
     /// A fast, unsafe version of cryptoSignKeypair that doesn't validate arguments.
@@ -115,10 +122,8 @@ public final class Libsodium {
     /// @param mlen the length of the message
     /// @param sk secret key
     /// @return 0 on success
-    /// @throws Throwable if any exception occurs during the call to native code
     public int cryptoSignDetached(
-            final MemorySegment sig, MemorySegment siglenP, final MemorySegment m, final long mlen, MemorySegment sk)
-            throws Throwable {
+            final MemorySegment sig, MemorySegment siglenP, final MemorySegment m, final long mlen, MemorySegment sk) {
         if (sk.byteSize() != ED25519_SECRETKEYBYTES) {
             throw new IllegalArgumentException(
                     "sk must be " + ED25519_SECRETKEYBYTES + " bytes long, got: " + sk.byteSize());
@@ -139,7 +144,11 @@ public final class Libsodium {
             throw new IllegalArgumentException("sig must be >= " + ED25519_BYTES + ", got: " + sig.byteSize());
         }
 
-        return cryptoSignDetachedNoChecks(sig, siglenP, m, mlen, sk);
+        try {
+            return cryptoSignDetachedNoChecks(sig, siglenP, m, mlen, sk);
+        } catch (Throwable t) {
+            throw new LibsodiumException(t);
+        }
     }
 
     /// A fast, unsafe version of cryptoSignDetached that doesn't validate arguments.
@@ -160,9 +169,8 @@ public final class Libsodium {
     /// @param mlen the length of the message
     /// @param pk public key
     /// @return 0 on success
-    /// @throws Throwable if any exception occurs during the call to native code
     public int cryptoSignVerifyDetached(
-            final MemorySegment sig, final MemorySegment m, final long mlen, final MemorySegment pk) throws Throwable {
+            final MemorySegment sig, final MemorySegment m, final long mlen, final MemorySegment pk) {
         if (pk.byteSize() != ED25519_PUBLICKEYBYTES) {
             throw new IllegalArgumentException(
                     "pk must be " + ED25519_PUBLICKEYBYTES + " bytes long, got: " + pk.byteSize());
@@ -177,7 +185,11 @@ public final class Libsodium {
             throw new IllegalArgumentException("sig must be >= " + ED25519_BYTES + ", got: " + sig.byteSize());
         }
 
-        return cryptoSignVerifyDetachedNoChecks(sig, m, mlen, pk);
+        try {
+            return cryptoSignVerifyDetachedNoChecks(sig, m, mlen, pk);
+        } catch (Throwable t) {
+            throw new LibsodiumException(t);
+        }
     }
 
     /// A fast, unsafe version of cryptoSignVerifyDetached that doesn't validate arguments.

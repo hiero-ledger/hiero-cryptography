@@ -45,7 +45,7 @@ jobs:
       - read-build-targets
     runs-on: macos-14
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
+      HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -71,15 +71,19 @@ jobs:
         with:
           cache-read-only: false
 
+      - name: Setup auto-tools/libtool for native builds
+        run: |
+          brew install automake libtool
+
       - name: Build Native Darwin
-        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64
+        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64 buildSecp256k1DarwinArm64 buildSecp256k1DarwinAmd64
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
     needs: read-build-targets
     runs-on: hl-crypto-lin-md
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
+      HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -124,7 +128,7 @@ jobs:
           sudo apt-get -y install mingw-w64
 
       - name: Build Native Linux / Windows
-        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64
+        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64
 
   build:
     name: Build TSS Crypto Library
@@ -134,7 +138,7 @@ jobs:
       - build_rust_linux_windows
     runs-on: hl-crypto-lin-lg
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
+      HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -182,7 +186,7 @@ jobs:
         os: [macos-14]
     runs-on: ${{ matrix.os }}
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
+      HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

@@ -36,7 +36,7 @@ jobs:
       - read-build-targets
     runs-on: hl-crypto-lin-md
     env:
-      HIERO_LIBSODIUM_TARGETS: ${{ needs.read-build-targets.outputs.hiero-libsodium-targets }}
+      HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0

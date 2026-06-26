@@ -7,26 +7,18 @@ import org.hiero.gradle.tasks.GitClone
 
 plugins { id("org.hiero.gradle.module.library") }
 
-testModuleInfo { requires("org.junit.jupiter.api") }
-
-tasks.test {
-    jvmArgs(
-        "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsodium"
-    )
-}
-
-/// Where we check out the libsodium repo from GitHub into the local build/ directory:
-/// Must end with "libsodium" or whatever name the GitHub repo has:
-val libRepositoryDir = layout.buildDirectory.dir("libsodium/input/libsodium")
+/// Where we check out the native library repo from GitHub into the local build/ directory:
+/// Must end with the name the GitHub repo has:
+val libRepositoryDir = layout.buildDirectory.dir("libsecp256k1/input/secp256k1")
 /// Where build tasks write output to:
 /// Must be outside of input/ above so that Gradle is happy:
-val libOutputDir = layout.buildDirectory.dir("libsodium/output")
+val libOutputDir = layout.buildDirectory.dir("libsecp256k1/output")
 
-tasks.register<GitClone>("cloneLibsodium") {
+tasks.register<GitClone>("cloneSecp256k1") {
     localCloneDirectory = libRepositoryDir
-    url = "https://github.com/jedisct1/libsodium.git"
+    url = "https://github.com/bitcoin-core/secp256k1.git"
     // branch = "master"
-    tag = "1.0.22-RELEASE"
+    tag = "v0.7.1"
 }
 
 // We cannot build from a single repo for multiple targets at once. So we limit parallelizm:
@@ -34,7 +26,7 @@ gradle.sharedServices.registerIfAbsent("lock", TaskLockService::class) { maxPara
 
 /// Builds a native library via ./configure && make and copies .so/.dylib/.dll to resources.
 @CacheableTask
-abstract class BuildLibsodiumTask : DefaultTask() {
+abstract class BuildSecp256k1Task : DefaultTask() {
     @get:ServiceReference("lock") abstract val lock: Property<TaskLockService>
 
     @get:Inject protected abstract val execOps: ExecOperations
@@ -69,6 +61,12 @@ abstract class BuildLibsodiumTask : DefaultTask() {
                 workingDir(libraryDir)
                 commandLine("make", "clean")
             }
+        } else {
+            // Generate the Makefile
+            execOps.exec {
+                workingDir(libraryDir)
+                commandLine("sh", "./autogen.sh")
+            }
         }
 
         execOps.exec {
@@ -90,13 +88,15 @@ abstract class BuildLibsodiumTask : DefaultTask() {
 
         // Copy the lib to the resources
         val libExts = listOf("so", "dylib", "dll")
-        // libsodium native build adds a "-/.26" suffix/infix to the lib name.
+        // secp256k1 native build adds a "-/.6" suffix/infix to the lib name.
         // It has something to do with ABI version or maybe something else.
         val filename =
             libExts
-                .flatMap { libExt -> listOf("libsodium?26.${libExt}", "libsodium.${libExt}.26") }
+                .flatMap { libExt ->
+                    listOf("libsecp256k1?6.${libExt}", "libsecp256k1.${libExt}.6")
+                }
                 .toList()
-        val buildDir = libraryDir.get().dir("src/libsodium/.libs")
+        val buildDir = libraryDir.get().dir(".libs")
         val targetDir = outputDir.get().dir(outputPath.get())
         println("Copy $filename from $buildDir/ to $targetDir/")
         files.mkdir(targetDir)
@@ -108,8 +108,8 @@ abstract class BuildLibsodiumTask : DefaultTask() {
 
             eachFile { println("   Copying: $displayName") }
 
-            // Remove the "-/.26" suffix because we don't need it.
-            rename { name -> name.replace(".26", "").replace("-26", "") }
+            // Remove the "-/.6" suffix because we don't need it.
+            rename { name -> name.replace(".6", "").replace("-6", "") }
         }
         println("Finished copying files.")
         // The output dir w/o the os/arch/ path to print everything we have so far:
@@ -136,15 +136,9 @@ data class NativeTarget(val os: String, val arch: String, val configureHost: Str
 // compilation. If the host value is missing, then ./configure will be invoked w/o any parameters,
 // assuming a local host build for the local host target (i.e. no cross-compilation.)
 //
-// Each defined target will result in creating a :libsodium:buildLibsodium<Os><Arch> Gradle task
+// Each defined target will result in creating a :libsodium:buildSecp256k1<Os><Arch> Gradle task
 // where <Os> and <Arch> will be capitalized versions of the os and arch from the target name.
-//
-// The :libsodium:compile[Test]Java targets will take a dependency on the local host target build
-// task only. This is to ensure that unit tests can access a local host target-built native library.
-//
-// The jar task takes a dependency on all the buildLibsodium tasks for all targets.
-// This is to ensure that the published artifact in CI has native libraries for all supported
-// platforms.
+// The output of each task will be added as resources to the main sourceSet.
 //
 // Individual GitHub CI runner tasks could build specific targets on specific hosts (e.g. darwin on
 // Mac) and the Gradle Cache will take care of aggregating all the results when assembling the final
@@ -192,13 +186,13 @@ val targets =
         .get()
 
 targets.forEach { target ->
-    val name = "buildLibsodium" + target.os.capitalized() + target.arch.capitalized()
+    val name = "buildSecp256k1" + target.os.capitalized() + target.arch.capitalized()
     val task =
-        tasks.register<BuildLibsodiumTask>(name) {
-            libraryDir = tasks.named<GitClone>("cloneLibsodium").flatMap { it.localCloneDirectory }
+        tasks.register<BuildSecp256k1Task>(name) {
+            libraryDir = tasks.named<GitClone>("cloneSecp256k1").flatMap { it.localCloneDirectory }
             configureHost = target.configureHost
             outputDir = libOutputDir.get().dir("${target.os}-${target.arch}")
-            outputPath = "com/hedera/nativelib/libsodium/${target.os}/${target.arch}"
+            outputPath = "com/hedera/nativelib/secp256k1/${target.os}/${target.arch}"
         }
 
     // Include all built native libraries into the .jar and mark them as resources for tests to use:

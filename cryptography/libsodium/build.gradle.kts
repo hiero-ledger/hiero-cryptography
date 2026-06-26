@@ -21,6 +21,7 @@ tasks.test {
 jmhModuleInfo {
     requires("com.hedera.cryptography.libsodium")
     requires("com.goterl.lazysodium")
+    requires("com.hedera.pbj.runtime")
 }
 
 /// Where we check out the libsodium repo from GitHub into the local build/ directory:

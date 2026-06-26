@@ -4,6 +4,7 @@ package com.hedera.cryptography.libsodium;
 import com.goterl.lazysodium.LazySodiumJava;
 import com.goterl.lazysodium.SodiumJava;
 import com.goterl.lazysodium.interfaces.Sign;
+import com.hedera.pbj.runtime.io.buffer.Bytes;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -49,6 +50,9 @@ public class LazysodiumBench {
         byte[] sk;
         byte[] sig;
 
+        Bytes msgBytes;
+        Bytes sigBytes;
+
         @Setup(Level.Trial)
         public void setup() throws Throwable {
             msg = new byte[64];
@@ -61,6 +65,9 @@ public class LazysodiumBench {
             sig = new byte[64];
 
             LAZYSODIUM.cryptoSignDetached(sig, msg, msg.length, sk);
+
+            msgBytes = Bytes.wrap(msg);
+            sigBytes = Bytes.wrap(sig);
         }
 
         @TearDown(Level.Trial)
@@ -80,6 +87,16 @@ public class LazysodiumBench {
     public void cryptoSignVerifyDetached(final LazysodiumState state, final Blackhole blackhole) throws Throwable {
         for (int i = 0; i < INVOCATIONS; i++) {
             blackhole.consume(LAZYSODIUM.cryptoSignVerifyDetached(state.sig, state.msg, state.msg.length, state.pk));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(INVOCATIONS)
+    public void cryptoSignVerifyDetached_Bytes(final LazysodiumState state, final Blackhole blackhole)
+            throws Throwable {
+        for (int i = 0; i < INVOCATIONS; i++) {
+            blackhole.consume(LAZYSODIUM.cryptoSignVerifyDetached(
+                    state.sigBytes.toByteArray(), state.msgBytes.toByteArray(), state.msg.length, state.pk));
         }
     }
 

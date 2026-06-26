@@ -13,4 +13,5 @@ dependencies.constraints {
 
     // Tests/JMH only:
     api("com.goterl:lazysodium-java:5.2.0") { because("com.goterl.lazysodium") }
+    api("com.hedera.pbj:pbj-runtime:0.15.10") { because("com.hedera.pbj.runtime") }
 }

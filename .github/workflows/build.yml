@@ -126,6 +126,7 @@ jobs:
           sudo apt-get -y install g++-aarch64-linux-gnu
           sudo apt-get -y install binutils-aarch64-linux-gnu
           sudo apt-get -y install mingw-w64
+          sudo apt-get -y install autoconf automake libtool libtool-bin
 
       - name: Build Native Linux / Windows
         run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64

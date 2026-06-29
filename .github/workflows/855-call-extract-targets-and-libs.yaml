@@ -31,7 +31,7 @@ jobs:
       hiero-native-targets: ${{ steps.get-targets-and-libs.outputs.hiero-native-targets }}
     steps:
       - name: Initialize Job
-        uses: pandaswhocode/initialize-github-job@c392c3e699995ab6030915302d2fc9bffb1e861f # v1.1.0
+        uses: pandaswhocode/initialize-github-job@e3702830d1274012a017768dfff33844be90f17f # v1.1.2
         with:
           checkout: "true"
           checkout-token: "${{ secrets.github-token }}"

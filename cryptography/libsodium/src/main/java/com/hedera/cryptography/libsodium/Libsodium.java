@@ -121,27 +121,26 @@ public final class Libsodium {
     /// @param m message to sign, must be >= 1 bytes long
     /// @param mlen the length of the message
     /// @param sk secret key
-    /// @return 0 on success
+    /// @return 0 on success, 1..5 if arguments are invalid, or a non-zero failure code from libsodium
     public int cryptoSignDetached(
             final MemorySegment sig, MemorySegment siglenP, final MemorySegment m, final long mlen, MemorySegment sk) {
         if (sk.byteSize() != ED25519_SECRETKEYBYTES) {
-            throw new IllegalArgumentException(
-                    "sk must be " + ED25519_SECRETKEYBYTES + " bytes long, got: " + sk.byteSize());
+            return 1;
         }
         if (mlen < 1) {
-            throw new IllegalArgumentException("mlen must be >= 1, got: " + mlen);
+            return 2;
         }
         if (m.byteSize() < mlen) {
-            throw new IllegalArgumentException("m must be >= " + mlen + " bytes long, got: " + m.byteSize());
+            return 3;
         }
         if (siglenP == null) {
             // For convenience:
             siglenP = MemorySegment.NULL;
         } else if (siglenP != MemorySegment.NULL && siglenP.byteSize() < Long.BYTES) {
-            throw new IllegalArgumentException("siglenP must be >= " + Long.BYTES + ", got: " + siglenP.byteSize());
+            return 4;
         }
         if (sig.byteSize() < ED25519_BYTES) {
-            throw new IllegalArgumentException("sig must be >= " + ED25519_BYTES + ", got: " + sig.byteSize());
+            return 5;
         }
 
         try {
@@ -168,21 +167,20 @@ public final class Libsodium {
     /// @param m a message, must be >= 1 bytes long
     /// @param mlen the length of the message
     /// @param pk public key
-    /// @return 0 on success
+    /// @return 0 on success, 1..4 if arguments are invalid, or a non-zero failure code from libsodium
     public int cryptoSignVerifyDetached(
             final MemorySegment sig, final MemorySegment m, final long mlen, final MemorySegment pk) {
         if (pk.byteSize() != ED25519_PUBLICKEYBYTES) {
-            throw new IllegalArgumentException(
-                    "pk must be " + ED25519_PUBLICKEYBYTES + " bytes long, got: " + pk.byteSize());
+            return 1;
         }
         if (mlen < 1) {
-            throw new IllegalArgumentException("mlen must be >= 1, got: " + mlen);
+            return 2;
         }
         if (m.byteSize() < mlen) {
-            throw new IllegalArgumentException("m must be >= " + mlen + " bytes long, got: " + m.byteSize());
+            return 3;
         }
         if (sig.byteSize() < ED25519_BYTES) {
-            throw new IllegalArgumentException("sig must be >= " + ED25519_BYTES + ", got: " + sig.byteSize());
+            return 4;
         }
 
         try {

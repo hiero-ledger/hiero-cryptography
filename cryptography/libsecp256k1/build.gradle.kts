@@ -42,8 +42,7 @@ abstract class BuildSecp256k1Task : DefaultTask() {
     @get:Input abstract val configureHost: Property<String>
 
     /// To make Gradle Cache happy, we're adding yet another input property that contains "os-arch".
-    /// Apparently, the `outputPath` below is insufficient for Gradle Cache to key an entry
-    // properly.
+    /// Apparently, the `outputPath` below is insufficient for Gradle Cache to key an entry.
     @get:Input abstract val targetId: Property<String>
 
     /// Where the binary library to be written.

@@ -7,6 +7,14 @@ import org.hiero.gradle.tasks.GitClone
 
 plugins { id("org.hiero.gradle.module.library") }
 
+testModuleInfo { requires("org.junit.jupiter.api") }
+
+tasks.test {
+    jvmArgs(
+        "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsecp256k1"
+    )
+}
+
 /// Where we check out the native library repo from GitHub into the local build/ directory:
 /// Must end with the name the GitHub repo has:
 val libRepositoryDir = layout.buildDirectory.dir("libsecp256k1/input/secp256k1")
@@ -74,7 +82,8 @@ abstract class BuildSecp256k1Task : DefaultTask() {
         }
 
         execOps.exec {
-            val cmd = mutableListOf("sh", "./configure")
+            // enable ECDSA pubkey recovery module:
+            val cmd = mutableListOf("sh", "./configure", "--enable-module-recovery")
             if (configureHost.get() != "") {
                 // ./configure calls target a "host", so:
                 cmd.add("--host")
@@ -197,7 +206,7 @@ targets.forEach { target ->
             configureHost = target.configureHost
             targetId = "${target.os}-${target.arch}"
             outputDir = libOutputDir.get().dir("${target.os}-${target.arch}")
-            outputPath = "com/hedera/nativelib/secp256k1/${target.os}/${target.arch}"
+            outputPath = "com/hedera/nativelib/libsecp256k1/${target.os}/${target.arch}"
         }
 
     // Include all built native libraries into the .jar and mark them as resources for tests to use:

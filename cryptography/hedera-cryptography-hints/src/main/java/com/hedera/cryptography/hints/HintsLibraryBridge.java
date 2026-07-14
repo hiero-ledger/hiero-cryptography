@@ -21,6 +21,9 @@ public class HintsLibraryBridge {
     /** The minimum length of an aggregationKey = 48 prefix + at least 1 byte of data. */
     private static final int MIN_AGGREGATION_KEY_SIZE = 49;
 
+    private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 1632;
+    private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
+
     static {
         // Open the package to allow access to the native library
         // This can be done in module-info.java as well, but by default the compiler complains since there are no
@@ -350,11 +353,11 @@ public class HintsLibraryBridge {
             long thresholdNumerator,
             long thresholdDenominator) {
         if (signature == null
-                || signature.length == 0
+                || signature.length != AGGREGATE_SIGNATURE_LENGTH_BYTES
                 || message == null
                 || message.length == 0
                 || verificationKey == null
-                || verificationKey.length == 0
+                || verificationKey.length != TSS_VERIFICATION_KEY_LENGTH_BYTES
                 || thresholdNumerator <= 0L
                 || thresholdDenominator <= 0L) {
             return false;

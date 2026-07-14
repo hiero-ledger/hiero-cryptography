@@ -209,8 +209,11 @@ public class NativeBinary {
         final Path tempDirectory = createTempDirectory();
         final Path tempFile = tempDirectory.resolve(fileName);
 
-        Files.copy(resourceStream, tempFile);
+        try (resourceStream) {
+            Files.copy(resourceStream, tempFile);
+        }
         setPermissions(tempFile, "r-x------");
+        tempFile.toFile().deleteOnExit();
 
         return tempFile;
     }

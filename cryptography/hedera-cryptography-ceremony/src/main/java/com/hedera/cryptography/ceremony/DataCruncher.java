@@ -31,9 +31,14 @@ class DataCruncher {
         try {
             if (!process.waitFor(PROCESS_WAIT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
                 System.err.println("Timed out waiting for process");
+                process.destroy();
+                process.waitFor(1, TimeUnit.SECONDS);
+                process.destroyForcibly();
                 return Integer.MIN_VALUE;
             }
         } catch (InterruptedException e) {
+            process.destroy();
+            process.destroyForcibly();
             Thread.currentThread().interrupt();
             return Integer.MIN_VALUE;
         }

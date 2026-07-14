@@ -130,6 +130,14 @@ public final class TSS {
                     + (HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH)
                     + " bytes, instead got " + (tssSignature == null ? null : (tssSignature.length + "")));
         }
+        if ((tssSignature.length - HINTS_VERIFICATION_KEY_LENGTH - HINTS_SIGNATURE_LENGTH)
+                > Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH)) {
+            throw new IllegalArgumentException("`tssSignature` is too long. Expected no more than "
+                    + (HINTS_VERIFICATION_KEY_LENGTH
+                            + HINTS_SIGNATURE_LENGTH
+                            + Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH))
+                    + " bytes, instead got " + tssSignature.length);
+        }
         if (message == null || message.length == 0) {
             throw new IllegalArgumentException("`message` must be a non-empty array");
         }

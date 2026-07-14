@@ -17,6 +17,10 @@ public class WRAPSLibraryBridge {
     /** The max theoretical sum of weights all nodes together can have, which is 2^63-1 because we use signed long. */
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
 
+    private static final int COMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 704;
+    private static final int ADDRESS_BOOK_HASH_LENGTH_BYTES = 32;
+    private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
+
     static {
         // Open the package to allow access to the native library
         // This can be done in module-info.java as well, but by default the compiler complains since there are no
@@ -502,11 +506,11 @@ public class WRAPSLibraryBridge {
         // Don't check the isProofSupported() because this call doesn't require the binary artifacts anymore
         // (because the WRAPSVerificationKey hard-codes the key.)
         if (genesisAddressBookHash == null
-                || genesisAddressBookHash.length == 0
+                || genesisAddressBookHash.length != ADDRESS_BOOK_HASH_LENGTH_BYTES
                 || tssVerificationKey == null
-                || tssVerificationKey.length == 0
+                || tssVerificationKey.length != TSS_VERIFICATION_KEY_LENGTH_BYTES
                 || compressedProof == null
-                || compressedProof.length == 0) {
+                || compressedProof.length != COMPRESSED_WRAPS_PROOF_LENGTH_BYTES) {
             return false;
         }
         return verifyCompressedProofImpl(

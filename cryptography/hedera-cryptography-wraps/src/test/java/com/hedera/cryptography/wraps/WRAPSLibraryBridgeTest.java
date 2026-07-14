@@ -831,7 +831,7 @@ public class WRAPSLibraryBridgeTest {
         final byte[] genesisAddressBookHash =
                 WRAPS.hashAddressBook(genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds());
 
-        final byte[] dummyHintsKey = new byte[1288];
+        final byte[] dummyHintsKey = new byte[1096];
 
         final byte[] message0 = WRAPS.formatRotationMessage(
                 genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds(), dummyHintsKey);

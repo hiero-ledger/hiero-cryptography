@@ -123,7 +123,7 @@ impl<const SIZE: usize> BitMap<SIZE> {
             while cur < start + size && cur < to && !*bits_pointer.add(cur) {
                 cur += 1;
             }
-            if cur == start + size && cur < to {
+            if cur == start + size && cur <= to {
                 return (start, first_true_index)
             }
 

@@ -21,6 +21,7 @@ tasks.test {
 jmhModuleInfo {
     requires("com.hedera.cryptography.libsecp256k1")
     requires("org.hyperledger.besu.nativelib.secp256k1")
+    requires("com.sun.jna")
 }
 
 /// Where we check out the native library repo from GitHub into the local build/ directory:

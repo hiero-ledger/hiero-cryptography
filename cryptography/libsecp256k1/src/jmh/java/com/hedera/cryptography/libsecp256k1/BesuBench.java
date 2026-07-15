@@ -3,6 +3,7 @@ package com.hedera.cryptography.libsecp256k1;
 
 import static org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1.CONTEXT;
 
+import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import java.nio.ByteBuffer;
 import java.util.Random;
@@ -52,6 +53,17 @@ public class BesuBench {
         byte[] pkSerializedCompressedArr;
         LongByReference sizeRef;
 
+        byte[] messageHash32;
+        LibSecp256k1.secp256k1_ecdsa_recoverable_signature recoverableSignature;
+        LibSecp256k1.secp256k1_ecdsa_signature signature;
+
+        LibSecp256k1.secp256k1_ecdsa_signature normalizedSignature;
+
+        // Scratch buffer
+        LibSecp256k1.secp256k1_ecdsa_signature nativeSignature;
+        LibSecp256k1.secp256k1_pubkey nativePublicKey;
+        byte[] publicKeyInput;
+
         @Setup(Level.Trial)
         public void setup() throws Throwable {
             pubKey = new LibSecp256k1.secp256k1_pubkey();
@@ -59,8 +71,8 @@ public class BesuBench {
             sk = new byte[Libsecp256k1.SECRET_KEY_BYTES];
             pk = new byte[Libsecp256k1.PUBLIC_KEY_BYTES];
 
-            pkSerialized = ByteBuffer.allocate(65);
             pkSerializedArr = new byte[65];
+            pkSerialized = ByteBuffer.wrap(pkSerializedArr);
             pkSerializedCompressed = ByteBuffer.allocate(33);
             pkSerializedCompressedArr = new byte[33];
             sizeRef = new LongByReference(pkSerialized.limit());
@@ -81,6 +93,24 @@ public class BesuBench {
             LibSecp256k1.secp256k1_ec_pubkey_serialize(
                     CONTEXT, pkSerializedCompressed, sizeRef, pubKey, LibSecp256k1.SECP256K1_EC_COMPRESSED);
             pkSerializedCompressed.get(0, pkSerializedCompressedArr);
+
+            messageHash32 = new byte[32];
+            RANDOM.nextBytes(messageHash32);
+
+            recoverableSignature = new LibSecp256k1.secp256k1_ecdsa_recoverable_signature();
+            LibSecp256k1.secp256k1_ecdsa_sign_recoverable(CONTEXT, recoverableSignature, messageHash32, sk, null, null);
+
+            signature = new LibSecp256k1.secp256k1_ecdsa_signature();
+            LibSecp256k1.secp256k1_ecdsa_recoverable_signature_serialize_compact(
+                    CONTEXT, ByteBuffer.wrap(signature.data), new IntByReference(), recoverableSignature);
+
+            normalizedSignature = new LibSecp256k1.secp256k1_ecdsa_signature();
+            LibSecp256k1.secp256k1_ecdsa_signature_normalize(CONTEXT, normalizedSignature, signature);
+
+            nativeSignature = new LibSecp256k1.secp256k1_ecdsa_signature();
+            nativePublicKey = new LibSecp256k1.secp256k1_pubkey();
+            publicKeyInput = new byte[65];
+            publicKeyInput[0] = 0x04;
         }
 
         @TearDown(Level.Trial)
@@ -123,6 +153,30 @@ public class BesuBench {
         for (int i = 0; i < INVOCATIONS; i++) {
             blackhole.consume(
                     LibSecp256k1.secp256k1_ec_pubkey_parse(CONTEXT, state.pubKey, state.pkSerializedCompressedArr, 33));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(INVOCATIONS)
+    public void secp256k1EcdsaSignatureNormalize(BesuState state, Blackhole blackhole) {
+        for (int i = 0; i < INVOCATIONS; i++) {
+            blackhole.consume(LibSecp256k1.secp256k1_ecdsa_signature_normalize(
+                    CONTEXT, state.normalizedSignature, state.signature));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(INVOCATIONS)
+    public void secp256k1EcdsaVerify(BesuState state, Blackhole blackhole) {
+        for (int i = 0; i < INVOCATIONS; i++) {
+            // Logic from EcdsaSecp256k1Verifier.verify()
+            LibSecp256k1.secp256k1_ecdsa_signature_parse_compact(CONTEXT, state.nativeSignature, state.signature.data);
+            LibSecp256k1.secp256k1_ecdsa_signature_normalize(CONTEXT, state.nativeSignature, state.nativeSignature);
+            System.arraycopy(state.pkSerializedArr, 1, state.publicKeyInput, 1, state.pkSerializedArr.length - 1);
+            LibSecp256k1.secp256k1_ec_pubkey_parse(
+                    CONTEXT, state.nativePublicKey, state.publicKeyInput, state.publicKeyInput.length);
+            blackhole.consume(LibSecp256k1.secp256k1_ecdsa_verify(
+                    CONTEXT, state.nativeSignature, state.messageHash32, state.nativePublicKey));
         }
     }
 

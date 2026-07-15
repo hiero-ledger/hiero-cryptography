@@ -49,6 +49,18 @@ public class Libsecp256k1Bench {
         byte[] pkSerializedCompressed;
         long[] sizeArr;
 
+        byte[] messageHash32;
+        byte[] recoverableSignature;
+        byte[] signature;
+        int[] recId;
+
+        byte[] normalizedSignature;
+
+        // Scratch buffer
+        byte[] nativeSignature;
+        byte[] nativePublicKey;
+        byte[] publicKeyInput;
+
         @Setup(Level.Trial)
         public void setup() throws Throwable {
             sk = new byte[Libsecp256k1.SECRET_KEY_BYTES];
@@ -78,6 +90,33 @@ public class Libsecp256k1Bench {
                     MemorySegment.ofArray(sizeArr),
                     pkSeg,
                     Libsecp256k1.SECP256K1_EC_COMPRESSED);
+
+            messageHash32 = new byte[32];
+            RANDOM.nextBytes(messageHash32);
+
+            recoverableSignature = new byte[65];
+            INSTANCE.secp256k1EcdsaSignRecoverable(
+                    MemorySegment.ofArray(recoverableSignature),
+                    MemorySegment.ofArray(messageHash32),
+                    skSeg,
+                    MemorySegment.NULL,
+                    MemorySegment.NULL);
+
+            signature = new byte[64];
+            recId = new int[1];
+            INSTANCE.secp256k1EcdsaRecoverableSignatureSerializeCompact(
+                    MemorySegment.ofArray(signature),
+                    MemorySegment.ofArray(recId),
+                    MemorySegment.ofArray(recoverableSignature));
+
+            normalizedSignature = new byte[64];
+            INSTANCE.secp256k1EcdsaSignatureNormalize(
+                    MemorySegment.ofArray(normalizedSignature), MemorySegment.ofArray(signature));
+
+            nativeSignature = new byte[Libsecp256k1.SIGNATURE_BYTES];
+            nativePublicKey = new byte[Libsecp256k1.PUBLIC_KEY_BYTES];
+            publicKeyInput = new byte[65];
+            publicKeyInput[0] = 0x04;
         }
 
         @TearDown(Level.Trial)
@@ -125,6 +164,33 @@ public class Libsecp256k1Bench {
         for (int i = 0; i < INVOCATIONS; i++) {
             blackhole.consume(INSTANCE.secp256k1EcPubkeyParse(
                     MemorySegment.ofArray(state.pk), MemorySegment.ofArray(state.pkSerializedCompressed), 33));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(INVOCATIONS)
+    public void secp256k1EcdsaSignatureNormalize(Libsecp256k1State state, Blackhole blackhole) {
+        for (int i = 0; i < INVOCATIONS; i++) {
+            blackhole.consume(INSTANCE.secp256k1EcdsaSignatureNormalize(
+                    MemorySegment.ofArray(state.normalizedSignature), MemorySegment.ofArray(state.signature)));
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(INVOCATIONS)
+    public void secp256k1EcdsaVerify(Libsecp256k1State state, Blackhole blackhole) {
+        for (int i = 0; i < INVOCATIONS; i++) {
+            // Logic from EcdsaSecp256k1Verifier.verify()
+            final MemorySegment nativeSignatureSeg = MemorySegment.ofArray(state.nativeSignature);
+            final MemorySegment nativePublicKeySeg = MemorySegment.ofArray(state.nativePublicKey);
+
+            INSTANCE.secp256k1EcdsaSignatureParseCompact(nativeSignatureSeg, MemorySegment.ofArray(state.signature));
+            INSTANCE.secp256k1EcdsaSignatureNormalize(nativeSignatureSeg, nativeSignatureSeg);
+            System.arraycopy(state.pkSerialized, 1, state.publicKeyInput, 1, state.pkSerialized.length - 1);
+            INSTANCE.secp256k1EcPubkeyParse(
+                    nativePublicKeySeg, MemorySegment.ofArray(state.publicKeyInput), state.publicKeyInput.length);
+            blackhole.consume(INSTANCE.secp256k1EcdsaVerify(
+                    nativeSignatureSeg, MemorySegment.ofArray(state.messageHash32), nativePublicKeySeg));
         }
     }
 

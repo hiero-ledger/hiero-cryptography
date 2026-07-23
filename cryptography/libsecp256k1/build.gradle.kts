@@ -5,7 +5,10 @@ import org.gradle.kotlin.dsl.register
 import org.hiero.gradle.services.TaskLockService
 import org.hiero.gradle.tasks.GitClone
 
-plugins { id("org.hiero.gradle.module.library") }
+plugins {
+    id("org.hiero.gradle.module.library")
+    id("org.hiero.gradle.feature.benchmark")
+}
 
 testModuleInfo { requires("org.junit.jupiter.api") }
 
@@ -13,6 +16,12 @@ tasks.test {
     jvmArgs(
         "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libsecp256k1"
     )
+}
+
+jmhModuleInfo {
+    requires("com.hedera.cryptography.libsecp256k1")
+    requires("org.hyperledger.besu.nativelib.secp256k1")
+    requires("com.sun.jna")
 }
 
 /// Where we check out the native library repo from GitHub into the local build/ directory:

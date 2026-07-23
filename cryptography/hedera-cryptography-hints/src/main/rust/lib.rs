@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod hints;
+pub mod jni_bls;
 pub mod jni_crs;
 pub mod jni_hints;
 pub mod setup;

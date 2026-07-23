@@ -23,6 +23,8 @@ public class HintsLibraryBridge {
 
     private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 1632;
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
+    private static final int COMPRESSED_G1_LENGTH_BYTES = 48;
+    private static final int COMPRESSED_G2_LENGTH_BYTES = 96;
 
     static {
         // Open the package to allow access to the native library
@@ -386,6 +388,39 @@ public class HintsLibraryBridge {
             final byte[] verificationKey,
             long thresholdNumerator,
             long thresholdDenominator);
+
+    /**
+     * Decompresses a BLS12-381 G1 point from its 48-byte compressed form and returns its 128-byte
+     * EIP-2537 uncompressed encoding: [16 zeros | x (48 bytes BE) | 16 zeros | y (48 bytes BE)].
+     *
+     * @param compressedPoint the 48-byte compressed G1 point
+     * @return the 128-byte EIP-2537 encoding, or null on error
+     */
+    public byte[] decompressG1ToEip2537(final byte[] compressedPoint) {
+        if (compressedPoint == null || compressedPoint.length != COMPRESSED_G1_LENGTH_BYTES) {
+            return null;
+        }
+        return decompressG1ToEip2537Impl(compressedPoint);
+    }
+
+    private native byte[] decompressG1ToEip2537Impl(final byte[] compressedPoint);
+
+    /**
+     * Decompresses a BLS12-381 G2 point from its 96-byte compressed form and returns its 256-byte
+     * EIP-2537 uncompressed encoding, with Fp2 elements encoded real-part-first:
+     * [16 zeros | x.c0 (48 BE) | 16 zeros | x.c1 (48 BE) | 16 zeros | y.c0 (48 BE) | 16 zeros | y.c1 (48 BE)].
+     *
+     * @param compressedPoint the 96-byte compressed G2 point
+     * @return the 256-byte EIP-2537 encoding, or null on error
+     */
+    public byte[] decompressG2ToEip2537(final byte[] compressedPoint) {
+        if (compressedPoint == null || compressedPoint.length != COMPRESSED_G2_LENGTH_BYTES) {
+            return null;
+        }
+        return decompressG2ToEip2537Impl(compressedPoint);
+    }
+
+    private native byte[] decompressG2ToEip2537Impl(final byte[] compressedPoint);
 
     /**
      * Reset cached CRS and AggregatedKey values in native code.

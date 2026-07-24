@@ -77,4 +77,56 @@ public class HintsLibraryBridgeBlsTest {
         // 96 zero bytes is not a valid compressed G2 point.
         assertNull(INSTANCE.decompressG2ToEip2537(new byte[96]));
     }
+
+    // -------------------------------------------------------------------------
+    // decompressG1ToEip2537Blst
+    // -------------------------------------------------------------------------
+
+    @Test
+    void testDecompressG1ToEip2537Blst() {
+        assertArrayEquals(BlsConstants.G1_EIP2537, INSTANCE.decompressG1ToEip2537Blst(BlsConstants.G1_COMPRESSED));
+    }
+
+    @Test
+    void testDecompressG1ToEip2537BlstNullInput() {
+        assertNull(INSTANCE.decompressG1ToEip2537Blst(null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 47, 49, 96})
+    void testDecompressG1ToEip2537BlstWrongLength(int length) {
+        assertNull(INSTANCE.decompressG1ToEip2537Blst(new byte[length]));
+    }
+
+    @Test
+    void testDecompressG1ToEip2537BlstInvalidPoint() {
+        // 48 zero bytes is not a valid compressed G1 point.
+        assertNull(INSTANCE.decompressG1ToEip2537Blst(new byte[48]));
+    }
+
+    // -------------------------------------------------------------------------
+    // decompressG2ToEip2537Blst
+    // -------------------------------------------------------------------------
+
+    @Test
+    void testDecompressG2ToEip2537Blst() {
+        assertArrayEquals(BlsConstants.G2_EIP2537, INSTANCE.decompressG2ToEip2537Blst(BlsConstants.G2_COMPRESSED));
+    }
+
+    @Test
+    void testDecompressG2ToEip2537BlstNullInput() {
+        assertNull(INSTANCE.decompressG2ToEip2537Blst(null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 48, 95, 97, 128})
+    void testDecompressG2ToEip2537BlstWrongLength(int length) {
+        assertNull(INSTANCE.decompressG2ToEip2537Blst(new byte[length]));
+    }
+
+    @Test
+    void testDecompressG2ToEip2537BlstInvalidPoint() {
+        // 96 zero bytes is not a valid compressed G2 point.
+        assertNull(INSTANCE.decompressG2ToEip2537Blst(new byte[96]));
+    }
 }

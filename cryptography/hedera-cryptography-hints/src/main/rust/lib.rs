@@ -4,6 +4,7 @@ pub mod hints;
 pub mod jni_bls;
 pub mod jni_crs;
 pub mod jni_hints;
+pub mod jni_blst;
 pub mod setup;
 pub mod errors;
 

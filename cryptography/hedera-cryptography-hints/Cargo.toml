@@ -32,3 +32,6 @@ rand = { version = "^0.8.0" }
 rand_chacha = { version = "^0.3.0" }
 jni = "0.21.1"
 zeroize = "1.8"
+
+# For benchmarking only:
+blst = "0.3.16"

@@ -82,7 +82,7 @@ abstract class BuildXKCPTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val libraryDir: DirectoryProperty
 
-    /// `os` string. Relevant for Windows target to rename .so to .dll
+    /// `os` string. Relevant for Windows target to rename .so to .dll, see below.
     @get:Input abstract val os: Property<String>
 
     /// XKCP architecture name
@@ -113,19 +113,6 @@ abstract class BuildXKCPTask : DefaultTask() {
             commandLine("make", "clean")
         }
 
-        // Tested (on Mac aarch64 laptop) and not-yet-tested invocations:
-        // make ARMv8ASHA3x4/libXKCP.dylib
-        //    -> bin/ARMv8ASHA3x4/libXKCP.dylib
-        // make x86-64/libXKCP.dylib CC="clang -target x86_64-apple-darwin" EXTRA_CFLAGS="-arch
-        // x86_64" EXTRA_LDFLAGS="-arch x86_64"
-        //    -> bin/x86-64/libXKCP.dylib
-        // make x86-64/libXKCP.so CC=x86_64-w64-mingw32-gcc
-        //    -> bin/x86-64/libXKCP.so
-        //    RENAME to .dll
-        // ? make x86-64/libXKCP.so
-        //    -> bin/x86-64/libXKCP.so
-        // ? make aarch64/libXKCP.so CC=aarch64-linux-gnu-gcc
-        //    -> bin/aarch64/libXKCP.so
         execOps.exec {
             workingDir(libraryDir)
 
@@ -149,7 +136,8 @@ abstract class BuildXKCPTask : DefaultTask() {
 
             eachFile { println("   Copying: $displayName") }
 
-            // mingw ends up writing a .dll binary into a .so file, so we rename it:
+            // mingw ends up writing a .dll binary into a .so file, so we rename it.
+            // Note that the binary itself is an actual, MZ-prefixed Window dynamic library.
             rename { name -> if (os.get() == "windows") name.replace(".so", ".dll") else name }
         }
         println("Finished copying files.")
@@ -226,7 +214,7 @@ val targets =
                 listOf("CC=aarch64-linux-gnu-gcc"),
             ),
         )
-    else
+    else // local developer build for the local native target only:
         listOf(
             NativeTarget(
                 hostOperatingSystem,

@@ -76,7 +76,7 @@ jobs:
           brew install automake libtool
 
       - name: Build Native Darwin
-        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64 buildSecp256k1DarwinArm64 buildSecp256k1DarwinAmd64
+        run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64 buildSecp256k1DarwinArm64 buildSecp256k1DarwinAmd64 buildXKCPDarwinArm64 buildXKCPDarwinAmd64
 
   build_rust_linux_windows:
     name: Build Rust - Linux / Windows
@@ -129,7 +129,7 @@ jobs:
           sudo apt-get -y install autoconf automake libtool libtool-bin
 
       - name: Build Native Linux / Windows
-        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64
+        run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64 buildXKCPLinuxAmd64 buildXKCPLinuxArm64 buildXKCPWindowsAmd64
 
   build:
     name: Build TSS Crypto Library

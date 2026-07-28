@@ -205,9 +205,9 @@ val targets =
                 "x86-64",
                 "libXKCP.dylib",
                 listOf(
-                    "CC=\"clang -target x86_64-apple-darwin\"",
-                    "EXTRA_CFLAGS=\"-arch x86_64\"",
-                    "EXTRA_LDFLAGS=\"-arch x86_64\"",
+                    "CC=clang -target x86_64-apple-darwin",
+                    "EXTRA_CFLAGS=-arch x86_64",
+                    "EXTRA_LDFLAGS=-arch x86_64",
                 ),
             ),
             NativeTarget(

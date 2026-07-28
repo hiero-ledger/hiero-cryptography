@@ -75,6 +75,9 @@ jobs:
         run: |
           brew install automake libtool
 
+      - name: Verify Clang
+        run: clang --version
+
       - name: Build Native Darwin
         run: ./gradlew cargoBuildX86Darwin cargoBuildAarch64Darwin buildLibsodiumDarwinArm64 buildLibsodiumDarwinAmd64 buildSecp256k1DarwinArm64 buildSecp256k1DarwinAmd64 buildXKCPDarwinArm64 buildXKCPDarwinAmd64
 
@@ -127,6 +130,7 @@ jobs:
           sudo apt-get -y install binutils-aarch64-linux-gnu
           sudo apt-get -y install mingw-w64
           sudo apt-get -y install autoconf automake libtool libtool-bin
+          sudo apt-get -y install xsltproc
 
       - name: Build Native Linux / Windows
         run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64 buildXKCPLinuxAmd64 buildXKCPLinuxArm64 buildXKCPWindowsAmd64

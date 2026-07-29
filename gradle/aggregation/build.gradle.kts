@@ -5,4 +5,5 @@ dependencies {
     published(project(":hedera-cryptography-ceremony"))
     published(project(":libsodium"))
     published(project(":libsecp256k1"))
+    published(project(":libxkcp"))
 }

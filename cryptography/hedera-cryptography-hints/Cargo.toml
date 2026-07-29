@@ -32,3 +32,7 @@ rand = { version = "^0.8.0" }
 rand_chacha = { version = "^0.3.0" }
 jni = "0.21.1"
 zeroize = "1.8"
+
+# Above, we use ark-bls12-381 in hinTS and WRAPS in order to interact with the rest of the ark ecosystem.
+# But when exposing native BLS APIs directly, we prefer to use blst because it's faster and more secure:
+blst = "0.3.17"

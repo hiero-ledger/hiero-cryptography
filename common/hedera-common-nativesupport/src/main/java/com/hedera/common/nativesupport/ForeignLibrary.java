@@ -5,7 +5,6 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.SymbolLookup;
-import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.util.Map;
@@ -97,14 +96,10 @@ public class ForeignLibrary extends NativeBinary {
     /// @return a MethodHandle for the function
     /// @throws IllegalStateException if the function cannot be found
     @SuppressWarnings("restricted")
-    public static MethodHandle find(final SymbolLookup lookup, final Linker linker, final String name, final FunctionDescriptor descriptor) {
+    public static MethodHandle find(
+            final SymbolLookup lookup, final Linker linker, final String name, final FunctionDescriptor descriptor) {
         return lookup.find(name)
-                .map(symbol -> linker.downcallHandle(
-                        symbol,
-                        descriptor,
-                        Linker.Option.critical(true)))
+                .map(symbol -> linker.downcallHandle(symbol, descriptor, Linker.Option.critical(true)))
                 .orElseThrow(() -> new IllegalStateException("Function '" + name + "' not found"));
     }
-
-
 }

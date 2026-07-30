@@ -2,7 +2,11 @@
 package com.hedera.common.nativesupport;
 
 import java.lang.foreign.Arena;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
 import java.lang.foreign.SymbolLookup;
+import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -83,4 +87,24 @@ public class ForeignLibrary extends NativeBinary {
         final Path path = extract(c);
         return SymbolLookup.libraryLookup(path, arena);
     }
+
+    /// Finds a `MethodHandle` by `name` with the provided `FunctionDescriptor` and links it as "critical"
+    /// to allow passing Java on-heap arrays directly to the native function w/o copying them.
+    /// @param lookup a SymbolLookup (see `ForeignLibrary.lookup()`)
+    /// @param linker a native linker (e.g. `Linker.nativeLinker()`)
+    /// @param name a name of the native function
+    /// @param descriptor a FunctionDescriptor with return/arguments types
+    /// @return a MethodHandle for the function
+    /// @throws IllegalStateException if the function cannot be found
+    @SuppressWarnings("restricted")
+    public static MethodHandle find(final SymbolLookup lookup, final Linker linker, final String name, final FunctionDescriptor descriptor) {
+        return lookup.find(name)
+                .map(symbol -> linker.downcallHandle(
+                        symbol,
+                        descriptor,
+                        Linker.Option.critical(true)))
+                .orElseThrow(() -> new IllegalStateException("Function '" + name + "' not found"));
+    }
+
+
 }

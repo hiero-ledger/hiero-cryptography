@@ -153,7 +153,8 @@ public class NativeBinary {
         if (index == -1 || index == name.length() - 1) {
             return "";
         } else {
-            return name.substring(0, index).replace('/', '.');
+            // Note: assume everything is lower-case as it should be, except for possibly the binary name:
+            return name.substring(0, index).replace('/', '.').toLowerCase(Locale.ROOT);
         }
     }
 

@@ -131,7 +131,7 @@ public class NativeBinary {
         }
         return SOFTWARE_FOLDER_NAME
                 + RESOURCE_PATH_DELIMITER
-                + libraryName
+                + libraryName.toLowerCase(Locale.US)
                 + RESOURCE_PATH_DELIMITER
                 + os.name().toLowerCase(Locale.US)
                 + RESOURCE_PATH_DELIMITER
@@ -153,8 +153,7 @@ public class NativeBinary {
         if (index == -1 || index == name.length() - 1) {
             return "";
         } else {
-            // Note: assume everything is lower-case as it should be, except for possibly the binary name:
-            return name.substring(0, index).replace('/', '.').toLowerCase(Locale.ROOT);
+            return name.substring(0, index).replace('/', '.');
         }
     }
 

@@ -56,6 +56,10 @@ impl PowersOfTauProtocol {
         let mut rng = rand_chacha::ChaCha8Rng::from_seed(seed);
         let r = F::rand(&mut rng);
 
+        // we want the degree to be at least 2, so powers_of_g to be at least length 3
+        if crs.powers_of_g.len() < 3 {
+            return Err(HinTSError::InsufficientCRS(crs.powers_of_g.len()));
+        }
         let degree = crs.powers_of_g.len() - 1;
 
         let powers_of_r = (0..=degree).map(|i| r.pow(&[i as u64])).collect::<Vec<F>>();
@@ -93,6 +97,14 @@ impl PowersOfTauProtocol {
 
     /// verifies that the update to the CRS is valid using the proof of contribution
     pub fn verify_contribution(prev_crs: &CRS, next_crs: &CRS, proof: &ContributionProof) -> bool {
+        if prev_crs.powers_of_g.len() != next_crs.powers_of_g.len()
+            || prev_crs.powers_of_h.len() != next_crs.powers_of_h.len()
+            || prev_crs.powers_of_g.len() != prev_crs.powers_of_h.len()
+            || prev_crs.powers_of_g.len() < 3
+        {
+            return false;
+        }
+
         let c1 = {
             match check1(&prev_crs.powers_of_g[1], &next_crs.powers_of_g[1], proof) {
                 Ok(c1) => c1,
@@ -229,9 +241,12 @@ fn check2(crs: &CRS) -> Result<bool, usize> {
 
 // eqn 4.4 in https://eprint.iacr.org/2022/1592.pdf
 fn check3(crs: &CRS) -> bool {
-    // note that we use location 0 to store the generator (denoted B1)
-    // so we need to perform this check for element at index 1
-    return crs.powers_of_g[1] != G1AffinePoint::zero();
+    // note that we use location 0 to store the generator
+    // and location 1 stores the first power of tau
+    // let us check for non-degeneracy
+    let c1 = crs.powers_of_g[0] == G1AffinePoint::generator() && crs.powers_of_h[0] == G2AffinePoint::generator();
+    let c2 = crs.powers_of_g[1] != G1AffinePoint::zero() && crs.powers_of_h[1] != G2AffinePoint::zero();
+    c1 && c2
 }
 
 // takes a list of byte slices and computes the sha256 hash

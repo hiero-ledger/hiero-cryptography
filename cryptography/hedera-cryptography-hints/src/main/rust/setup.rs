@@ -23,6 +23,32 @@ pub struct ContributionProof {
 
 pub struct PowersOfTauProtocol {}
 
+fn validate_crs_tower_lengths(prev_crs: &CRS, next_crs: &CRS) -> Result<usize, HinTSError> {
+    let prev_powers_of_g_len = prev_crs.powers_of_g.len();
+    let prev_powers_of_h_len = prev_crs.powers_of_h.len();
+    let next_powers_of_g_len = next_crs.powers_of_g.len();
+    let next_powers_of_h_len = next_crs.powers_of_h.len();
+
+    if prev_powers_of_g_len < 3 {
+        return Err(HinTSError::InsufficientCRS(prev_powers_of_g_len));
+    }
+
+    if prev_powers_of_g_len != next_powers_of_g_len
+        || prev_powers_of_h_len != next_powers_of_h_len
+        || prev_powers_of_g_len != prev_powers_of_h_len
+    {
+        return Err(HinTSError::InvalidInput(format!(
+            "CRS tower lengths are inconsistent: previous G1 = {}, previous G2 = {}, next G1 = {}, next G2 = {}",
+            prev_powers_of_g_len,
+            prev_powers_of_h_len,
+            next_powers_of_g_len,
+            next_powers_of_h_len
+        )));
+    }
+
+    Ok(prev_powers_of_g_len)
+}
+
 impl PowersOfTauProtocol {
     /// outputs the initial CRS without any entropy, to kickstart the ceremony;
     /// this should be the first CRS without any participant's contribution;
@@ -38,8 +64,10 @@ impl PowersOfTauProtocol {
     /// prunes the CRS to a smaller degree by removing the higher degree elements;
     /// returns an error if new_degree is larger than current degree
     pub fn prune_crs(crs: &CRS, new_degree: usize) -> Result<CRS, HinTSError> {
+        let crs_len = validate_crs_tower_lengths(crs, crs)?;
+
         // we obviously cannot prune to a degree larger than current degree
-        if new_degree + 1 > crs.powers_of_g.len() {
+        if new_degree >= crs_len {
             return Err(HinTSError::InsufficientCRS(new_degree));
         }
 
@@ -56,11 +84,8 @@ impl PowersOfTauProtocol {
         let mut rng = rand_chacha::ChaCha8Rng::from_seed(seed);
         let r = F::rand(&mut rng);
 
-        // we want the degree to be at least 2, so powers_of_g to be at least length 3
-        if crs.powers_of_g.len() < 3 {
-            return Err(HinTSError::InsufficientCRS(crs.powers_of_g.len()));
-        }
-        let degree = crs.powers_of_g.len() - 1;
+        let crs_len = validate_crs_tower_lengths(crs, crs)?;
+        let degree = crs_len - 1;
 
         let powers_of_r = (0..=degree).map(|i| r.pow(&[i as u64])).collect::<Vec<F>>();
 
@@ -97,11 +122,7 @@ impl PowersOfTauProtocol {
 
     /// verifies that the update to the CRS is valid using the proof of contribution
     pub fn verify_contribution(prev_crs: &CRS, next_crs: &CRS, proof: &ContributionProof) -> bool {
-        if prev_crs.powers_of_g.len() != next_crs.powers_of_g.len()
-            || prev_crs.powers_of_h.len() != next_crs.powers_of_h.len()
-            || prev_crs.powers_of_g.len() != prev_crs.powers_of_h.len()
-            || prev_crs.powers_of_g.len() < 3
-        {
+        if validate_crs_tower_lengths(prev_crs, next_crs).is_err() {
             return false;
         }
 
@@ -285,5 +306,32 @@ mod tests {
                 crate::hints::serialize(&next_next_crs).unwrap().as_slice()
             ).unwrap()
         );
+    }
+
+    #[test]
+    fn test_rejects_mismatched_crs_tower_lengths() {
+        let crs = Prot::init(4);
+        let (mut next_crs, proof) = Prot::contribute(&crs, [0u8; 32]).unwrap();
+        next_crs.powers_of_h.pop();
+
+        assert!(matches!(
+            Prot::contribute(&next_crs, [1u8; 32]),
+            Err(HinTSError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            Prot::prune_crs(&next_crs, 2),
+            Err(HinTSError::InvalidInput(_))
+        ));
+        assert!(!Prot::verify_contribution(&crs, &next_crs, &proof));
+    }
+
+    #[test]
+    fn test_prune_crs_rejects_overflowing_degree() {
+        let crs = Prot::init(4);
+
+        assert!(matches!(
+            Prot::prune_crs(&crs, usize::MAX),
+            Err(HinTSError::InsufficientCRS(usize::MAX))
+        ));
     }
 }

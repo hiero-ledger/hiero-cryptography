@@ -298,19 +298,43 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let aggregate_signature = SchnorrSignatureVar {
+        // mostly important to constrain the prev_pk_vars, but let us also do the others for completeness
+        for i in 0..K {
+            // enforce that the previous public keys are equal to the external inputs
+            prev_pk_vars[i].x.enforce_equal(&external_inputs.0[4*i + 0])?;
+            prev_pk_vars[i].y.enforce_equal(&external_inputs.0[4*i + 1])?;
+            // enforce that the previous weights are equal to the external inputs
+            prev_weights[i].enforce_equal(&external_inputs.0[4*i + 2])?;
+            // enforce that the present bits are equal to the external inputs
+            present_bits[i].enforce_equal(&external_inputs.0[4*K + i]
+                .to_bytes_le()?
+                .into_iter()
+                .next()
+                .ok_or(SynthesisError::Unsatisfiable)?)?;
+        }
+
+        // allocate a variable for aggregate signature
+        let aggregate_signature_var = SchnorrSignatureVar {
             verifier_challenge: external_inputs.0[5 * K + 0].to_bytes_le()?,
             prover_response: external_inputs.0[5 * K + 1].to_bytes_le()?,
             _group: PhantomData,
         };
+        // enforce that aggregate_signature fields are equal to external inputs
+        aggregate_signature_var.verifier_challenge.enforce_equal(
+            &external_inputs.0[5 * K + 0].to_bytes_le()?,
+        )?;
+        aggregate_signature_var.prover_response.enforce_equal(
+            &external_inputs.0[5 * K + 1].to_bytes_le()?,
+        )?;
 
         // compute aggregate public key and aggregate weight from the bitvector
-        let zero_weight = FpVar::<Fr>::new_witness(
-            cs.clone(), || Ok(Fr::from(0))
+        let zero_weight = FpVar::<Fr>::new_constant(
+            cs.clone(), Fr::from(0)
         )?;
-        let zero_jubjub_element = JubJubVar::new_witness(
-            cs.clone(), || Ok(ark_ed_on_bn254::EdwardsAffine::zero())
+        let zero_jubjub_element = JubJubVar::new_constant(
+            cs.clone(), ark_ed_on_bn254::EdwardsAffine::zero()
         )?;
+
         let mut aggregate_weight = FpVar::<Fr>::new_witness(
             cs.clone(), || Ok(Fr::from(0))
         )?;
@@ -320,6 +344,11 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
         let mut aggregate_pubkey = JubJubVar::new_witness(
             cs.clone(), || Ok(ark_ed_on_bn254::EdwardsAffine::zero())
         )?;
+
+        aggregate_weight.enforce_equal(&zero_weight)?;
+        total_weight.enforce_equal(&zero_weight)?;
+        aggregate_pubkey.enforce_equal(&zero_jubjub_element)?;
+
         for i in 0..K {
             let is_present = present_bits[i].is_eq(&UInt::constant(1))?;
 
@@ -337,8 +366,7 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
         };
 
         // Enforce constraints between the witness values and the circuit variables
-        aggregate_pubkey.x.enforce_equal(&aggregate_schnorr_pubkey_var.pub_key.x)?;
-        aggregate_pubkey.y.enforce_equal(&aggregate_schnorr_pubkey_var.pub_key.y)?;
+        aggregate_pubkey.enforce_equal(&aggregate_schnorr_pubkey_var.pub_key)?;
 
         // Enforce that the aggregate weight is less than half the total weight.
         let two_times_aggregate_weight = &aggregate_weight + &aggregate_weight;
@@ -372,6 +400,8 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
         };
 
         // instantiate the Schnorr signature verification gadget
+        // note we do not need any randomness here, because the Schnorr parameters are public and fixed
+        // so we can use test_rng as input without any security implications
         let schnorr_parameters =
             Schnorr::setup(test_rng().gen()).map_err(|_| SynthesisError::Unsatisfiable)?;
         let parameters_var = <SchnorrVerifyGadget as SigVerifyGadget<Schnorr, Fr>>
@@ -387,16 +417,10 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
             &parameters_var,
             &aggregate_schnorr_pubkey_var,
             &msg_var,
-            &aggregate_signature
+            &aggregate_signature_var
         )?;
         // enforce that the signature is valid
         valid_sig_var.enforce_equal(&Boolean::<Fr>::TRUE)?;
-
-        // enforce that the previous public keys are equal to the external inputs
-        for i in 0..K {
-            prev_pk_vars[i].x.enforce_equal(&external_inputs.0[4*i + 0])?;
-            prev_pk_vars[i].y.enforce_equal(&external_inputs.0[4*i + 1])?;
-        }
 
         // enforce that the recomputed previous address book hash
         // is equal to the external input from the last step
@@ -1464,10 +1488,10 @@ mod tests {
         let (wraps_pk, wraps_vk) = if load_params_from_disk {
             let start = std::time::Instant::now();
             let cwd = env::current_dir().unwrap();
-            let nova_pp_bytes = std::fs::read(cwd.join("resources/ceremony_mainnet/nova_pp.bin")).unwrap();
-            let nova_vp_bytes = std::fs::read(cwd.join("resources/ceremony_mainnet/nova_vp.bin")).unwrap();
-            let decider_pp_bytes = std::fs::read(cwd.join("resources/ceremony_mainnet/decider_pp.bin")).unwrap();
-            let decider_vp_bytes = std::fs::read(cwd.join("resources/ceremony_mainnet/decider_vp.bin")).unwrap();
+            let nova_pp_bytes = std::fs::read(cwd.join("resources/local/nova_pp.bin")).unwrap();
+            let nova_vp_bytes = std::fs::read(cwd.join("resources/local/nova_vp.bin")).unwrap();
+            let decider_pp_bytes = std::fs::read(cwd.join("resources/local/decider_pp.bin")).unwrap();
+            let decider_vp_bytes = std::fs::read(cwd.join("resources/local/decider_vp.bin")).unwrap();
             println!("Read all parameters from disk: {:?}", start.elapsed());
 
             let start = std::time::Instant::now();

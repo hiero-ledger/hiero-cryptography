@@ -998,7 +998,7 @@ impl WRAPS {
             .fold(Fr::from(0), |acc, w| acc + w);
 
         // Ensure the aggregate weight is more than half the total weight.
-        if total_weight > (aggregate_weight + aggregate_weight) {
+        if total_weight >= (aggregate_weight + aggregate_weight) {
             return Ok(false);
         }
 

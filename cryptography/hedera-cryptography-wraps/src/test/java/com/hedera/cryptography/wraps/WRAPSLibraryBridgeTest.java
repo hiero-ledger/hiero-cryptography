@@ -20,6 +20,8 @@ public class WRAPSLibraryBridgeTest {
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final byte[][] EMPTY_BYTE_ARRAY_2 = new byte[0][];
 
+    private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 40946264;
+
     // We use ABs with 4 and 5 entries, so 8 should be good.
     private static final int SIGNERS_NUM = 8;
 
@@ -850,7 +852,7 @@ public class WRAPSLibraryBridgeTest {
                 dummyHintsKey,
                 output0.signature());
 
-        assertEquals(31568344, proof0.uncompressed().length);
+        assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof0.uncompressed().length);
         assertEquals(704, proof0.compressed().length);
 
         // Note: the compressed proof is non-deterministic, so we can only check the size, and then verify it:
@@ -895,7 +897,7 @@ public class WRAPSLibraryBridgeTest {
                 hintsKeys.verificationKey(),
                 output1.signature());
 
-        assertEquals(31568344, proof1.uncompressed().length);
+        assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof1.uncompressed().length);
         assertEquals(704, proof1.compressed().length);
         assertTrue(
                 WRAPS.verifyCompressedProof(proof1.compressed(), genesisAddressBookHash, hintsKeys.verificationKey()));

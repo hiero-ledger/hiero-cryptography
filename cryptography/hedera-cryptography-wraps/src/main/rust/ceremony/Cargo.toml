@@ -33,4 +33,5 @@ wraps = { path = "../wraps" }
 opt-level = 3
 
 [profile.release]
+panic = "unwind"
 opt-level = 3

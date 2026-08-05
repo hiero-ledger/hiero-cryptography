@@ -74,7 +74,7 @@ required-features = ["std"]
 opt-level = 3
 lto = "thin"
 incremental = true
-panic = 'abort'
+panic = 'unwind'
 
 [profile.bench]
 opt-level = 3
@@ -86,7 +86,7 @@ debug-assertions = false
 
 [profile.dev]
 opt-level = 0
-panic = 'abort'
+panic = 'unwind'
 
 [profile.test]
 opt-level = 3

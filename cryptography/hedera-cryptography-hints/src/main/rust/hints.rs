@@ -68,25 +68,28 @@ pub struct ProofOfPossesion {
 impl std::ops::Deref for SecretKey {
     type Target = F;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.secret
     }
 }
 
 impl std::borrow::Borrow<F> for SecretKey {
     fn borrow(&self) -> &F {
-        &self.0
+        &self.secret
     }
 }
 
-impl std::borrow::Borrow<F> for &SecretKey {
-    fn borrow(&self) -> &F {
-        &self.0
+impl std::borrow::Borrow<ProofOfPossesion> for SecretKey {
+    fn borrow(&self) -> &ProofOfPossesion {
+        &self.pop
     }
 }
 
 impl Zeroize for SecretKey {
     fn zeroize(&mut self) {
-        self.0 = F::from(0u64);
+        self.secret.zeroize();
+        self.pop.commitment.zeroize();
+        self.pop.challenge.zeroize();
+        self.pop.response.zeroize();
     }
 }
 
@@ -276,7 +279,7 @@ impl HinTS {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
-        let sk = sk_with_pop.secret;
+        let sk = &sk_with_pop.secret;
 
         //let us compute the q1 term
         let l_i_of_x = utils::lagrange_poly(n, i).ok_or(
@@ -303,7 +306,7 @@ impl HinTS {
             }
 
             let f = num.div(&z_of_x);
-            let sk_times_f = utils::poly_eval_mult_c(&f, &sk);
+            let sk_times_f = utils::poly_eval_mult_c(&f, sk);
 
             let com = KZG::commit_g1(&crs, &sk_times_f)?;
 
@@ -318,9 +321,9 @@ impl HinTS {
         //denominator is x
         let den = utils::compute_x_monomial();
         //qx_term = sk_i * (l_i(x) - l_i(0)) / x
-        let qx_term = utils::poly_eval_mult_c(&num.div(&den), &sk);
+        let qx_term = utils::poly_eval_mult_c(&num.div(&den), sk);
         //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0)) / x
-        let qx_term_mul_tau = utils::poly_eval_mult_c(&num, &sk);
+        let qx_term_mul_tau = utils::poly_eval_mult_c(&num, sk);
         //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
         let qx_term_com = KZG::commit_g1(&crs, &qx_term)?;
         //qx_term_mul_tau_com = [ sk_i * (l_i(τ) - l_i(0)) ]_1
@@ -330,7 +333,7 @@ impl HinTS {
         let sk_as_poly = utils::compute_constant_poly::<F>(sk);
         let pk = KZG::commit_g1(&crs, &sk_as_poly)?;
 
-        let sk_times_l_i_of_x = utils::poly_eval_mult_c(&l_i_of_x, &sk);
+        let sk_times_l_i_of_x = utils::poly_eval_mult_c(&l_i_of_x, sk);
         let com_sk_l_i_g1 = KZG::commit_g1(&crs, &sk_times_l_i_of_x)?;
         let com_sk_l_i_g2 = KZG::commit_g2(&crs, &sk_times_l_i_of_x)?;
 
@@ -500,7 +503,11 @@ impl HinTS {
                 epks.push(hint.clone());
             } else {
                 weights.push(F::from(0));
-                let zero_sk = SecretKey(F::from(0));
+                let zero = F::from(0);
+                let zero_sk = SecretKey {
+                    secret: zero,
+                    pop: generate_proof_of_knowledge(&zero, [0u8; RANDOM_SIZE])?,
+                };
                 epks.push(Self::hint_gen(crs, n, i, &zero_sk)?);
             }
         }
@@ -1303,7 +1310,9 @@ mod tests {
         // -------------- sample universe specific values ---------------
         //sample random keys
         // WARN: supply a random seed, not a fixed one as shown here.
-        let sks: Vec<SecretKey> = (0..num_signers).map(|_| HinTS::keygen([42u8; 32])).collect();
+        let sks: Vec<SecretKey> = (0..num_signers)
+            .map(|_| HinTS::keygen([42u8; 32]).unwrap())
+            .collect();
 
         let epks = (0..num_signers)
             .map(|i| HinTS::hint_gen(&crs, n, i, &sks[i]).unwrap())

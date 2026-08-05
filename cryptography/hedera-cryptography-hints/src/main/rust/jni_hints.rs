@@ -26,7 +26,10 @@ pub extern "system" fn Java_com_hedera_cryptography_hints_HintsLibraryBridge_gen
             Err(_) => return std::ptr::null_mut()
         };
 
-        let secret_key = HinTS::keygen(random_arr);
+        let secret_key = match HinTS::keygen(random_arr) {
+            Ok(val) => val,
+            Err(_) => return std::ptr::null_mut(),
+        };
         match jni_util::serialize_object(&env, &secret_key) {
             Ok(val) => val,
             Err(_) => std::ptr::null_mut()

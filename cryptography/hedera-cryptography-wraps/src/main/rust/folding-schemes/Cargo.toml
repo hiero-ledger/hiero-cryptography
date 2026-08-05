@@ -29,3 +29,6 @@ ark-vesta = { workspace = true, features = ["r1cs"] }
 # we only use them in the tests.
 ark-mnt4-298 = { workspace = true, features = ["curve", "r1cs"] }
 ark-mnt6-298 = { workspace = true, features = ["r1cs"] }
+
+[profile.release]
+panic = "unwind"

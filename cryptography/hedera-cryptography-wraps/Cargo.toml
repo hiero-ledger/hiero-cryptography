@@ -3,6 +3,7 @@ members = [
     "src/main/rust/folding-schemes",
     "src/main/rust/wraps",
     "src/main/rust/ceremony",
+    "src/main/rust/groth16",
 ]
 resolver = "2"
 

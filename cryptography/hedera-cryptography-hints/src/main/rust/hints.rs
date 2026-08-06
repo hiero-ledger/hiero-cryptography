@@ -746,6 +746,7 @@ impl HinTS {
         let agg_sig = add::<G2AffinePoint>(partial_sigs).mul(n_inv).into_affine();
 
         let parsum_of_tau_com = KZG::commit_g1(&crs, &psw_of_x)?;
+        let w_of_tau_com = KZG::commit_g1(&crs, &w_of_x)?;
         let b_of_tau_com = KZG::commit_g1(&crs, &b_of_x)?;
         let q1_of_tau_com = KZG::commit_g1(&crs, &psw_wff_q_of_x)?;
         let q2_of_tau_com = KZG::commit_g1(&crs, &b_wff_q_of_x)?;
@@ -779,14 +780,35 @@ impl HinTS {
         let b_wff_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_wff_q_of_x, &r)?;
         let b_check_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_check_q_of_x, &r)?;
 
+        let s = kzg_batch_argument_random_oracle(
+            &[
+                &parsum_of_tau_com,
+                &w_of_tau_com,
+                &b_of_tau_com,
+                &q1_of_tau_com,
+                &q3_of_tau_com,
+                &q2_of_tau_com,
+                &q4_of_tau_com
+            ],
+            &[
+                &psw_of_x.evaluate(&r),
+                &w_of_x.evaluate(&r),
+                &b_of_x.evaluate(&r),
+                &psw_wff_q_of_x.evaluate(&r),
+                &psw_check_q_of_x.evaluate(&r),
+                &b_wff_q_of_x.evaluate(&r),
+                &b_check_q_of_x.evaluate(&r)
+            ],
+        )?;
+
         // batched opening argument as it is for the same point r
         let merged_proof: G1AffinePoint = (psw_of_r_proof
-            + w_of_r_proof.mul(r.pow([1]))
-            + b_of_r_proof.mul(r.pow([2]))
-            + psw_wff_q_of_r_proof.mul(r.pow([3]))
-            + psw_check_q_of_r_proof.mul(r.pow([4]))
-            + b_wff_q_of_r_proof.mul(r.pow([5]))
-            + b_check_q_of_r_proof.mul(r.pow([6])))
+            + w_of_r_proof.mul(s.pow([1]))
+            + b_of_r_proof.mul(s.pow([2]))
+            + psw_wff_q_of_r_proof.mul(s.pow([3]))
+            + psw_check_q_of_r_proof.mul(s.pow([4]))
+            + b_wff_q_of_r_proof.mul(s.pow([5]))
+            + b_check_q_of_r_proof.mul(s.pow([6])))
         .into();
 
         Ok(ThresholdSignature {
@@ -964,7 +986,7 @@ fn proof_of_knowledge_random_oracle(
     statement: G1AffinePoint,
     commitment: G1AffinePoint
 ) -> Result<F, HinTSError> {
-    const POP_DST: &[u8] = b"HieroTSSHinTSPoP";
+    const POP_DST: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_POP";
     let mut serialized_data = Vec::new();
     g.serialize_compressed(&mut serialized_data)
         .map_err(|e| HinTSError::EncodingError(e))?;
@@ -976,6 +998,22 @@ fn proof_of_knowledge_random_oracle(
         .map_err(|e| HinTSError::EncodingError(e))?;
 
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(POP_DST);
+    Ok(hasher.hash_to_field(&serialized_data, 1)[0])
+}
+
+fn kzg_batch_argument_random_oracle(
+    commitments: &[&G1AffinePoint],
+    evaluations: &[&F],
+) -> Result<F, HinTSError> {
+    const DST: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_KZG_BATCH";
+    let mut serialized_data = Vec::new();
+    for &c in commitments {
+        c.serialize_compressed(&mut serialized_data)?;
+    }
+    for &e in evaluations {
+        e.serialize_compressed(&mut serialized_data)?;
+    }
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST);
     Ok(hasher.hash_to_field(&serialized_data, 1)[0])
 }
 
@@ -1012,7 +1050,7 @@ fn random_oracle(
     q3_com.serialize_compressed(&mut serialized_data)?;
     q4_com.serialize_compressed(&mut serialized_data)?;
 
-    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR";
+    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR_HINTS";
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST.as_bytes());
     let field_elements = hasher.hash_to_field(&serialized_data, 1);
 
@@ -1053,13 +1091,34 @@ fn verify_openings_in_proof(
     let b_wff_q_of_r_argument = π.q2_of_tau_com - vk.g_0.mul(π.q2_of_r).into_affine();
     let b_check_q_of_r_argument = π.q4_of_tau_com - vk.g_0.mul(π.q4_of_r).into_affine();
 
+    let s = kzg_batch_argument_random_oracle(
+        &[
+            &π.parsum_of_tau_com,
+            &w_of_x_com,
+            &π.b_of_tau_com,
+            &π.q1_of_tau_com,
+            &π.q3_of_tau_com,
+            &π.q2_of_tau_com,
+            &π.q4_of_tau_com
+        ],
+        &[
+            &π.parsum_of_r,
+            &π.w_of_r,
+            &π.b_of_r,
+            &π.q1_of_r,
+            &π.q3_of_r,
+            &π.q2_of_r,
+            &π.q4_of_r
+        ],
+    )?;
+
     let merged_argument: G1AffinePoint = (psw_of_r_argument
-        + w_of_r_argument.mul(r.pow([1]))
-        + b_of_r_argument.mul(r.pow([2]))
-        + psw_wff_q_of_r_argument.mul(r.pow([3]))
-        + psw_check_q_of_r_argument.mul(r.pow([4]))
-        + b_wff_q_of_r_argument.mul(r.pow([5]))
-        + b_check_q_of_r_argument.mul(r.pow([6])))
+        + w_of_r_argument.mul(s.pow([1]))
+        + b_of_r_argument.mul(s.pow([2]))
+        + psw_wff_q_of_r_argument.mul(s.pow([3]))
+        + psw_check_q_of_r_argument.mul(s.pow([4]))
+        + b_wff_q_of_r_argument.mul(s.pow([5]))
+        + b_check_q_of_r_argument.mul(s.pow([6])))
     .into_affine();
 
     let lhs = <Curve as Pairing>::pairing(merged_argument, vk.h_0);

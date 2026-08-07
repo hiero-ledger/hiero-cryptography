@@ -1001,6 +1001,7 @@ fn proof_of_knowledge_random_oracle(
     Ok(hasher.hash_to_field(&serialized_data, 1)[0])
 }
 
+// Fiat-Shamir transform to derive challenge for batch KZG argument
 fn kzg_batch_argument_random_oracle(
     commitments: &[&G1AffinePoint],
     evaluations: &[&F],

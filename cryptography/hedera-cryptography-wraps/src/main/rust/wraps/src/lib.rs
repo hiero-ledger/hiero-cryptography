@@ -502,12 +502,18 @@ fn verify_addressbook(ab: &AddressBook) -> Result<bool, WRAPSError> {
         return Err(WRAPSError::AddressBookSizeExceeded);
     }
     let sentinel = sentinel_pubkey();
-    for ((pk, pok), _weight, _node_id) in ab.iter() {
+    for ((pk, pok), weight, _node_id) in ab.iter() {
         if *pk == sentinel {
             continue;
         }
-        let is_valid = verify_proof_of_knowledge(pok, pk)?;
-        if !is_valid {
+
+        // check range [0, 2^64) of weight
+        let is_weight_valid = (*weight).into_bigint().num_bits() <= u64::BITS;
+
+        // verify proof of knowledge of the corresponding private key
+        let is_pok_valid = verify_proof_of_knowledge(pok, pk)?;
+
+        if !(is_pok_valid && is_weight_valid) {
             return Ok(false);
         }
     }

@@ -4,7 +4,26 @@ import org.gradle.internal.extensions.stdlib.capitalized
 import org.gradle.kotlin.dsl.register
 import org.hiero.gradle.services.TaskLockService
 
-plugins { id("org.hiero.gradle.module.library") }
+plugins {
+    id("org.hiero.gradle.module.library")
+    id("org.hiero.gradle.feature.benchmark")
+}
+
+testModuleInfo {
+    requires("org.junit.jupiter.api")
+    requires("org.bouncycastle.provider")
+}
+
+tasks.test {
+    jvmArgs(
+        "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.libxkcp"
+    )
+}
+
+jmhModuleInfo {
+    requires("com.hedera.cryptography.libxkcp")
+    requires("org.bouncycastle.provider")
+}
 
 /// Where we check out the XKCP repo from GitHub into the local build/ directory:
 /// Must end with "libsodium" or whatever name the GitHub repo has:
@@ -24,6 +43,7 @@ abstract class GitCloneCommit : DefaultTask() {
     @get:OutputDirectory abstract val localCloneDirectory: DirectoryProperty
 
     @get:Inject protected abstract val exec: ExecOperations
+    @get:Inject protected abstract val files: FileOperations
 
     @TaskAction
     fun cloneOrUpdate() {
@@ -50,10 +70,38 @@ abstract class GitCloneCommit : DefaultTask() {
             commandLine("git", "reset", "--hard", commit.get(), "-q")
         }
 
-        // This is very specific to XKCP as its build system is in a separate "submodule":
+        // NOTE!!!!! Below are steps very specific to XKCP  !!!!!
+
+        // The build system is in a separate "submodule":
         exec.exec {
             workingDir = localClone.asFile
             commandLine("git", "submodule", "update", "--init", "-q")
+        }
+
+        // Inject a function into the library code so that we can call it from Java
+        // to determine the correct size of a native structure.
+        val keccakHashFile =
+            files.file("${localClone.asFile.absolutePath}/lib/high/Keccak/FIPS202/KeccakHash.c")
+        keccakHashFile.appendText(
+            "size_t Hiero_sizeof_Keccak_HashInstance() { return sizeof(Keccak_HashInstance); }\n"
+        )
+
+        // Modify (and add) targets for libraries to include the FIPS202 APIs
+        // so that the Keccak Hash APIs are included into the dynamic libraries:
+        val makefileBuildFile = files.file("${localClone.asFile.absolutePath}/Makefile.build")
+        if (makefileBuildFile.exists()) {
+            val content = makefileBuildFile.readText()
+            val updatedContent =
+                content
+                    .replace(
+                        "<fragment name=\"libXKCP.a\" inherits=\"All\"/>",
+                        "<fragment name=\"libXKCP.a\" inherits=\"All FIPS202\"/>",
+                    )
+                    .replace(
+                        "<fragment name=\"libXKCP.so\" inherits=\"All\"/>",
+                        "<fragment name=\"libXKCP.so\" inherits=\"All FIPS202\"/>\n<fragment name=\"libXKCP.dylib\" inherits=\"All FIPS202\"/>",
+                    )
+            makefileBuildFile.writeText(updatedContent)
         }
     }
 }

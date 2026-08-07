@@ -15,7 +15,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::collections::HashMap;
 use ark_std::{ops::*, UniformRand};
 use sha2::Sha256;
-use rand_chacha::rand_core::SeedableRng;
+use rand_chacha::rand_core::{RngCore, SeedableRng};
 use zeroize::Zeroize;
 
 // hinTS depends on the utils and kzg modules
@@ -44,36 +44,52 @@ pub type G2ProjectivePoint = Projective<G2Config>;
 
 /// Type denoting a partial signature, which is a G2 group element
 pub type PartialSignature = G2AffinePoint;
-/// Type denoting secret key, which is just a scalar value
-#[derive(Clone, Debug, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
-pub struct SecretKey(F);
+
 /// Type denoting public key, which is a G1 group element
 pub type PublicKey = G1AffinePoint;
 /// Type denoting a signer's weight, which is just a scalar value
 pub type Weight = F;
 
+/// Type denoting secret key, which is just a scalar value
+#[derive(Clone, Debug, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
+pub struct SecretKey {
+    secret: F,
+    pop: ProofOfPossesion,
+}
+
+/// Non-interactive proof of knowledge of discrete log, using Fiat-Shamir transform
+#[derive(Debug, Clone, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct ProofOfPossesion {
+    pub commitment: G1AffinePoint,
+    pub challenge: F,
+    pub response: F,
+}
+
 impl std::ops::Deref for SecretKey {
     type Target = F;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.secret
     }
 }
 
 impl std::borrow::Borrow<F> for SecretKey {
     fn borrow(&self) -> &F {
-        &self.0
+        &self.secret
     }
 }
 
-impl std::borrow::Borrow<F> for &SecretKey {
-    fn borrow(&self) -> &F {
-        &self.0
+impl std::borrow::Borrow<ProofOfPossesion> for SecretKey {
+    fn borrow(&self) -> &ProofOfPossesion {
+        &self.pop
     }
 }
 
 impl Zeroize for SecretKey {
     fn zeroize(&mut self) {
-        self.0 = F::from(0u64);
+        self.secret.zeroize();
+        self.pop.commitment.zeroize();
+        self.pop.challenge.zeroize();
+        self.pop.response.zeroize();
     }
 }
 
@@ -154,6 +170,8 @@ pub struct ExtendedPublicKey {
     n: usize,
     /// public key pk = [sk]_1
     pk_i: PublicKey,
+    /// proof of knowledge of the secret key sk_i
+    pok_i: ProofOfPossesion,
     /// [ sk_i L_i(τ) ]_1
     sk_i_l_i_of_tau_com_1: G1AffinePoint,
     /// [ sk_i L_i(τ) ]_2
@@ -218,9 +236,19 @@ impl HinTS {
     /// generates a random secret key using a PRNG seeded by the input entropy
     pub fn keygen(
         seed: [u8; 32]
-    ) -> SecretKey {
+    ) -> Result<SecretKey, HinTSError> {
         let mut rng = rand_chacha::ChaCha8Rng::from_seed(seed);
-        SecretKey(F::rand(&mut rng))
+
+        // let us extract two random seeds from the PRNG
+        // for generating the secret and proof of possession
+        let mut secret_seed = [0u8; 32];
+        let mut proof_seed = [0u8; 32];
+        rng.fill_bytes(&mut secret_seed);
+        rng.fill_bytes(&mut proof_seed);
+
+        let secret = F::rand(&mut rand_chacha::ChaCha8Rng::from_seed(secret_seed));
+        let pop = generate_proof_of_knowledge(&secret, proof_seed)?;
+        Ok(SecretKey { secret, pop })
     }
 
     /// generates the extended public key (a.k.a. hint) for signer with
@@ -229,7 +257,7 @@ impl HinTS {
         crs: &CRS,
         n: usize,
         i: usize,
-        sk: &SecretKey
+        sk_with_pop: &SecretKey
     ) -> Result<ExtendedPublicKey, HinTSError> {
         // let us first perform sanity checks on the input
 
@@ -250,6 +278,8 @@ impl HinTS {
         if crs.powers_of_g.len() - 1 < n {
             return Err(HinTSError::InsufficientCRS(n));
         }
+
+        let sk = &sk_with_pop.secret;
 
         //let us compute the q1 term
         let l_i_of_x = utils::lagrange_poly(n, i).ok_or(
@@ -276,7 +306,7 @@ impl HinTS {
             }
 
             let f = num.div(&z_of_x);
-            let sk_times_f = utils::poly_eval_mult_c(&f, &sk);
+            let sk_times_f = utils::poly_eval_mult_c(&f, sk);
 
             let com = KZG::commit_g1(&crs, &sk_times_f)?;
 
@@ -291,9 +321,9 @@ impl HinTS {
         //denominator is x
         let den = utils::compute_x_monomial();
         //qx_term = sk_i * (l_i(x) - l_i(0)) / x
-        let qx_term = utils::poly_eval_mult_c(&num.div(&den), &sk);
+        let qx_term = utils::poly_eval_mult_c(&num.div(&den), sk);
         //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0)) / x
-        let qx_term_mul_tau = utils::poly_eval_mult_c(&num, &sk);
+        let qx_term_mul_tau = utils::poly_eval_mult_c(&num, sk);
         //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
         let qx_term_com = KZG::commit_g1(&crs, &qx_term)?;
         //qx_term_mul_tau_com = [ sk_i * (l_i(τ) - l_i(0)) ]_1
@@ -303,7 +333,7 @@ impl HinTS {
         let sk_as_poly = utils::compute_constant_poly::<F>(sk);
         let pk = KZG::commit_g1(&crs, &sk_as_poly)?;
 
-        let sk_times_l_i_of_x = utils::poly_eval_mult_c(&l_i_of_x, &sk);
+        let sk_times_l_i_of_x = utils::poly_eval_mult_c(&l_i_of_x, sk);
         let com_sk_l_i_g1 = KZG::commit_g1(&crs, &sk_times_l_i_of_x)?;
         let com_sk_l_i_g2 = KZG::commit_g2(&crs, &sk_times_l_i_of_x)?;
 
@@ -311,6 +341,7 @@ impl HinTS {
             i: i,
             n: n,
             pk_i: pk,
+            pok_i: sk_with_pop.pop.clone(),
             sk_i_l_i_of_tau_com_1: com_sk_l_i_g1,
             sk_i_l_i_of_tau_com_2: com_sk_l_i_g2,
             qz_i_terms: qz_terms,
@@ -358,6 +389,9 @@ impl HinTS {
         check_or_return_false!(!hint.qx_i_term.is_zero());
         check_or_return_false!(!hint.qx_i_term_mul_tau.is_zero());
         check_or_return_false!(hint.qz_i_terms.iter().all(|point| !point.is_zero()));
+
+        // verify proof of possession of the secret key
+        check_or_return_false!(verify_proof_of_knowledge(&hint.pok_i, &hint.pk_i)?);
 
         //e([sk_i L_i(τ)]1, [1]2) = e([sk_i]1, [L_i(τ)]2)
         let l_i_of_x = utils::lagrange_poly(n, i).ok_or(
@@ -469,7 +503,11 @@ impl HinTS {
                 epks.push(hint.clone());
             } else {
                 weights.push(F::from(0));
-                let zero_sk = SecretKey(F::from(0));
+                let zero = F::from(0);
+                let zero_sk = SecretKey {
+                    secret: zero,
+                    pop: generate_proof_of_knowledge(&zero, [0u8; RANDOM_SIZE])?,
+                };
                 epks.push(Self::hint_gen(crs, n, i, &zero_sk)?);
             }
         }
@@ -534,7 +572,7 @@ impl HinTS {
         msg: &[u8],
         sk: &SecretKey
     ) -> Result<PartialSignature, HinTSError> {
-        Ok(hash_to_g2(msg)?.mul(sk).into_affine())
+        Ok(hash_to_g2(msg)?.mul(sk.secret).into_affine())
     }
 
     /// verifies the partial signature under the signer's public key
@@ -708,6 +746,7 @@ impl HinTS {
         let agg_sig = add::<G2AffinePoint>(partial_sigs).mul(n_inv).into_affine();
 
         let parsum_of_tau_com = KZG::commit_g1(&crs, &psw_of_x)?;
+        let w_of_tau_com = KZG::commit_g1(&crs, &w_of_x)?;
         let b_of_tau_com = KZG::commit_g1(&crs, &b_of_x)?;
         let q1_of_tau_com = KZG::commit_g1(&crs, &psw_wff_q_of_x)?;
         let q2_of_tau_com = KZG::commit_g1(&crs, &b_wff_q_of_x)?;
@@ -741,14 +780,35 @@ impl HinTS {
         let b_wff_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_wff_q_of_x, &r)?;
         let b_check_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_check_q_of_x, &r)?;
 
+        let s = kzg_batch_argument_random_oracle(
+            &[
+                &parsum_of_tau_com,
+                &w_of_tau_com,
+                &b_of_tau_com,
+                &q1_of_tau_com,
+                &q3_of_tau_com,
+                &q2_of_tau_com,
+                &q4_of_tau_com
+            ],
+            &[
+                &psw_of_x.evaluate(&r),
+                &w_of_x.evaluate(&r),
+                &b_of_x.evaluate(&r),
+                &psw_wff_q_of_x.evaluate(&r),
+                &psw_check_q_of_x.evaluate(&r),
+                &b_wff_q_of_x.evaluate(&r),
+                &b_check_q_of_x.evaluate(&r)
+            ],
+        )?;
+
         // batched opening argument as it is for the same point r
         let merged_proof: G1AffinePoint = (psw_of_r_proof
-            + w_of_r_proof.mul(r.pow([1]))
-            + b_of_r_proof.mul(r.pow([2]))
-            + psw_wff_q_of_r_proof.mul(r.pow([3]))
-            + psw_check_q_of_r_proof.mul(r.pow([4]))
-            + b_wff_q_of_r_proof.mul(r.pow([5]))
-            + b_check_q_of_r_proof.mul(r.pow([6])))
+            + w_of_r_proof.mul(s.pow([1]))
+            + b_of_r_proof.mul(s.pow([2]))
+            + psw_wff_q_of_r_proof.mul(s.pow([3]))
+            + psw_check_q_of_r_proof.mul(s.pow([4]))
+            + b_wff_q_of_r_proof.mul(s.pow([5]))
+            + b_check_q_of_r_proof.mul(s.pow([6])))
         .into();
 
         Ok(ThresholdSignature {
@@ -790,6 +850,10 @@ impl HinTS {
         π: &ThresholdSignature,
         fraction: (F, F), // e.g. (1,3) to denote 1/3 threshold
     ) -> Result<bool, HinTSError> {
+        // Zero aggregate values satisfy the BLS pairing equation trivially.
+        check_or_return_false!(!π.agg_pk.is_zero());
+        check_or_return_false!(!π.agg_sig.is_zero());
+
         // check that the threshold is satisfied
         let (numerator, denominator) = fraction;
 
@@ -881,6 +945,79 @@ impl HinTS {
     }
 }
 
+// Generates a Schnorr proof of knowledge of the discrete log of the public key.
+fn generate_proof_of_knowledge(
+    x: &F,
+    seed:[u8; RANDOM_SIZE]
+) -> Result<ProofOfPossesion, HinTSError> {
+    let g = G1AffinePoint::generator();
+    let statement = (g * x).into_affine();
+
+    let r = F::rand(&mut rand_chacha::ChaCha8Rng::from_seed(seed));
+    let commitment = (g * r).into_affine();
+
+    let challenge = proof_of_knowledge_random_oracle(g, statement, commitment)?;
+
+    // compute response = r + challenge * x
+    let response = r + challenge * x;
+
+    Ok(ProofOfPossesion {
+        commitment,
+        challenge,
+        response,
+    })
+}
+
+// Verifies a Schnorr proof of knowledge of the discrete log of the public key.
+fn verify_proof_of_knowledge(
+    pok: &ProofOfPossesion,
+    pubkey: &PublicKey
+) -> Result<bool, HinTSError> {
+    let g = G1AffinePoint::generator();
+    let challenge = proof_of_knowledge_random_oracle(g, *pubkey, pok.commitment)?;
+    let lhs = g * pok.response;
+    let rhs = pok.commitment + (pubkey.clone() * pok.challenge);
+    Ok(lhs.into_affine() == rhs && challenge == pok.challenge)
+}
+
+// Fiat-Shamir transform to derive challenge for proof of knowledge
+fn proof_of_knowledge_random_oracle(
+    g: G1AffinePoint,
+    statement: G1AffinePoint,
+    commitment: G1AffinePoint
+) -> Result<F, HinTSError> {
+    const POP_DST: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_POP";
+    let mut serialized_data = Vec::new();
+    g.serialize_compressed(&mut serialized_data)
+        .map_err(|e| HinTSError::EncodingError(e))?;
+    statement
+        .serialize_compressed(&mut serialized_data)
+        .map_err(|e| HinTSError::EncodingError(e))?;
+    commitment
+        .serialize_compressed(&mut serialized_data)
+        .map_err(|e| HinTSError::EncodingError(e))?;
+
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(POP_DST);
+    Ok(hasher.hash_to_field(&serialized_data, 1)[0])
+}
+
+// Fiat-Shamir transform to derive challenge for batch KZG argument
+fn kzg_batch_argument_random_oracle(
+    commitments: &[&G1AffinePoint],
+    evaluations: &[&F],
+) -> Result<F, HinTSError> {
+    const DST: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_KZG_BATCH";
+    let mut serialized_data = Vec::new();
+    for &c in commitments {
+        c.serialize_compressed(&mut serialized_data)?;
+    }
+    for &e in evaluations {
+        e.serialize_compressed(&mut serialized_data)?;
+    }
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST);
+    Ok(hasher.hash_to_field(&serialized_data, 1)[0])
+}
+
 /// computes a hash for the Fiat-Shamir heuristic
 fn random_oracle(
     sk_com: G2AffinePoint,
@@ -914,7 +1051,7 @@ fn random_oracle(
     q3_com.serialize_compressed(&mut serialized_data)?;
     q4_com.serialize_compressed(&mut serialized_data)?;
 
-    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR";
+    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR_HINTS";
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST.as_bytes());
     let field_elements = hasher.hash_to_field(&serialized_data, 1);
 
@@ -955,13 +1092,34 @@ fn verify_openings_in_proof(
     let b_wff_q_of_r_argument = π.q2_of_tau_com - vk.g_0.mul(π.q2_of_r).into_affine();
     let b_check_q_of_r_argument = π.q4_of_tau_com - vk.g_0.mul(π.q4_of_r).into_affine();
 
+    let s = kzg_batch_argument_random_oracle(
+        &[
+            &π.parsum_of_tau_com,
+            &w_of_x_com,
+            &π.b_of_tau_com,
+            &π.q1_of_tau_com,
+            &π.q3_of_tau_com,
+            &π.q2_of_tau_com,
+            &π.q4_of_tau_com
+        ],
+        &[
+            &π.parsum_of_r,
+            &π.w_of_r,
+            &π.b_of_r,
+            &π.q1_of_r,
+            &π.q3_of_r,
+            &π.q2_of_r,
+            &π.q4_of_r
+        ],
+    )?;
+
     let merged_argument: G1AffinePoint = (psw_of_r_argument
-        + w_of_r_argument.mul(r.pow([1]))
-        + b_of_r_argument.mul(r.pow([2]))
-        + psw_wff_q_of_r_argument.mul(r.pow([3]))
-        + psw_check_q_of_r_argument.mul(r.pow([4]))
-        + b_wff_q_of_r_argument.mul(r.pow([5]))
-        + b_check_q_of_r_argument.mul(r.pow([6])))
+        + w_of_r_argument.mul(s.pow([1]))
+        + b_of_r_argument.mul(s.pow([2]))
+        + psw_wff_q_of_r_argument.mul(s.pow([3]))
+        + psw_check_q_of_r_argument.mul(s.pow([4]))
+        + b_wff_q_of_r_argument.mul(s.pow([5]))
+        + b_check_q_of_r_argument.mul(s.pow([6])))
     .into_affine();
 
     let lhs = <Curve as Pairing>::pairing(merged_argument, vk.h_0);
@@ -1212,7 +1370,9 @@ mod tests {
         // -------------- sample universe specific values ---------------
         //sample random keys
         // WARN: supply a random seed, not a fixed one as shown here.
-        let sks: Vec<SecretKey> = (0..num_signers).map(|_| HinTS::keygen([42u8; 32])).collect();
+        let sks: Vec<SecretKey> = (0..num_signers)
+            .map(|_| HinTS::keygen([42u8; 32]).unwrap())
+            .collect();
 
         let epks = (0..num_signers)
             .map(|i| HinTS::hint_gen(&crs, n, i, &sks[i]).unwrap())

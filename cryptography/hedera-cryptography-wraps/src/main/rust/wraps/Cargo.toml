@@ -34,3 +34,6 @@ folding-schemes = { workspace = true }
 
 [profile.dev]
 opt-level = 3
+
+[profile.release]
+panic = 'unwind'

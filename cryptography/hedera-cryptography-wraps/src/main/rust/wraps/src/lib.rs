@@ -444,22 +444,9 @@ fn pad_addressbook(ab: &AddressBook) -> Result<AddressBook, WRAPSError> {
 
 /// Hashes the serialized TSS verification key using Poseidon.
 pub fn hash_hints_vk(vk_bytes: &[u8]) -> Result<Fr, WRAPSError> {
-    let mut tss_vk_hash_elements = Vec::new();
-    let mut i = 0;
-    while i < vk_bytes.len() {
-        let start= i;
-        let end = std::cmp::min(i + 32, vk_bytes.len());
-        tss_vk_hash_elements.push(Fr::from_le_bytes_mod_order(&vk_bytes[start..end]));
-        i += 32;
-    }
-
-    let out_bytes = PoseidonCRH::evaluate(&poseidon_canonical_config::<Fr>(), tss_vk_hash_elements)
-        .map_err(|_| WRAPSError::CryptographyError)?;
-    let mut out = out_bytes
-        .to_field_elements()
-        .ok_or(WRAPSError::CryptographyError)?;
-    // out should contain one field element, because Poseidon output is in the field
-    out.pop().ok_or(WRAPSError::CryptographyError)
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<Fr>>
+        ::new(HINTS_VK_HASHING_DST);
+    Ok(hasher.hash_to_field::<1>(vk_bytes)[0])
 }
 
 /// Hashes all address book public keys and weights via Poseidon.
@@ -577,7 +564,8 @@ fn proof_of_knowledge_random_oracle(
         .serialize_compressed(&mut serialized_data)
         .map_err(|_| WRAPSError::CryptographyError)?;
 
-    let hasher = <DefaultFieldHasher<Sha256> as HashToField<JubJubFr>>::new(&[]);
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<JubJubFr>>
+        ::new(SCHNORR_KEY_POK_DST);
     Ok(hasher.hash_to_field::<1>(&serialized_data)[0])
 }
 
@@ -638,6 +626,15 @@ const SENTINEL_KEY_INPUT: &[u8] = b"HieroTSS";
 // Domain separator passed to `MapToCurveBasedHasher::new` when hashing
 // `SENTINEL_KEY_INPUT` to the JubJub curve.
 const SENTINEL_KEY_DST: &[u8] = b"HieroTSSWrapsSentinelKey";
+
+// Domain separator passed to `MapToCurveBasedHasher::new` when hashing
+// Schnorr proof of knowedge challenge to the JubJub curve.
+const SCHNORR_KEY_POK_DST: &[u8] = b"HieroTSSWrapsSchnorrKeyPoK";
+
+// Domain separator passed to `MapToCurveBasedHasher::new` when hashing
+// hints verification key to the Snark field.
+const HINTS_VK_HASHING_DST: &[u8] = b"HieroTSSWrapsHintsVkHash";
+
 
 /// Hashes the fixed `SENTINEL_KEY_INPUT` bytes to a JubJub curve point using
 /// arkworks' `MapToCurveBasedHasher` with `Elligator2Map` (true hash-to-curve).

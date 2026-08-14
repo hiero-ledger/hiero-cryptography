@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-val junit5 = "6.1.2"
+val junit5 = "6.1.3"
 val mockito = "5.23.0"
 val bouncycastle = "1.85"
 

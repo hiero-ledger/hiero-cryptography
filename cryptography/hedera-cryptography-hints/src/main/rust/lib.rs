@@ -11,3 +11,6 @@ mod kzg;
 mod utils;
 mod jni_util;
 mod jni_cache;
+
+#[cfg(test)]
+mod bench;

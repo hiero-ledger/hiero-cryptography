@@ -11,7 +11,15 @@ import java.util.Arrays;
 public final class TSS {
 
     private static final int HINTS_VERIFICATION_KEY_LENGTH = 1096;
-    private static final int HINTS_SIGNATURE_LENGTH = 1632;
+    /**
+     * The length of a serialized hinTS aggregate signature: 9 uncompressed G1 points, 1 uncompressed
+     * G2 point and 6 field elements. This is layout-critical, because a `tssSignature` is the
+     * concatenation `hintsVerificationKey || hintsSignature || abProof` and the offsets below are
+     * derived from it. It changed from 1632 when the four Plonkish quotient relations were merged
+     * into one (whitepaper section 3.4.3); it must stay in step with
+     * `HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES`.
+     */
+    private static final int HINTS_SIGNATURE_LENGTH = 9 * 96 + 192 + 6 * 32; // 1248
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 704;
     private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 192;
 

@@ -223,5 +223,3 @@ fn hints_bench_signature_size() {
     println!("  layout: 9 G1 + 1 G2 + 6 F; asserted by hints::tests::test_serialization");
     println!();
 }
-
-

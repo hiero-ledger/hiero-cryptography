@@ -20,6 +20,7 @@ public final class TSS {
      * `HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES`.
      */
     private static final int HINTS_SIGNATURE_LENGTH = 9 * 96 + 192 + 6 * 32; // 1248
+
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 704;
     private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 192;
 

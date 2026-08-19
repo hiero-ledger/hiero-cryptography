@@ -2,6 +2,7 @@
 package com.hedera.cryptography.libxkcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.foreign.MemorySegment;
@@ -57,5 +58,34 @@ public class LibxkcpTest {
         // Also check if we produce the same hash as Bouncy Castle:
         final byte[] bcHash = new Keccak.Digest256().digest(Constants.MESSAGE);
         assertArrayEquals(bcHash, hash);
+    }
+
+    @Test
+    void hashZeroBytes() throws Throwable {
+        final byte[] hashInstance = new byte[INSTANCE.sizeOfKeccakHashInstance];
+        final MemorySegment hashInstanceSeg = MemorySegment.ofArray(hashInstance);
+
+        assertEquals(
+                Libxkcp.KECCAK_SUCCESS,
+                INSTANCE.keccakHashInitialize(
+                        hashInstanceSeg,
+                        Libxkcp.SHA3_256_RATE,
+                        Libxkcp.SHA3_256_CAPACITY,
+                        Libxkcp.SHA3_256_HASHBITLEN,
+                        Libxkcp.SHA3_256_DELIMITED_SUFFIX_ORIGINAL));
+
+        // First check if it throws on negative length, which it should:
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> INSTANCE.keccakHashUpdate(hashInstanceSeg, MemorySegment.ofArray(new byte[0]), -1L));
+
+        // Then pass zero bytes:
+        assertEquals(
+                Libxkcp.KECCAK_SUCCESS,
+                INSTANCE.keccakHashUpdate(hashInstanceSeg, MemorySegment.ofArray(new byte[0]), 0L));
+
+        final byte[] hash = new byte[Libxkcp.SHA3_256_HASHVAL_LENGTH_BYTES];
+        assertEquals(Libxkcp.KECCAK_SUCCESS, INSTANCE.keccakHashFinal(hashInstanceSeg, MemorySegment.ofArray(hash)));
+        assertArrayEquals(Constants.ZERO_BYTES_HASH, hash);
     }
 }

@@ -162,8 +162,12 @@ public final class Libxkcp {
             throw new IllegalArgumentException("hashInstance must be " + sizeOfKeccakHashInstance
                     + " bytes long, instead got " + hashInstance.byteSize());
         }
-        if (databitlen <= 0) {
-            throw new IllegalArgumentException("databitlen must be positive, instead got: " + databitlen);
+        if (databitlen < 0) {
+            throw new IllegalArgumentException("databitlen must be non-negative, instead got: " + databitlen);
+        }
+        if (databitlen == 0) {
+            // There's no data to hash, so there's no need to call into native. It's a no-op:
+            return KECCAK_SUCCESS;
         }
         // Allow for a large buffer in case an application reuses a larger one:
         if (data.byteSize() < Math.ceilDiv(databitlen, 8)) {

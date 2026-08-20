@@ -9,6 +9,7 @@ pub mod tests {
 
     use ark_pallas::{Fr, Projective as G1};
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+    use ark_std::rand::{rngs::StdRng, SeedableRng};
     use ark_vesta::Projective as G2;
     use std::io::Write;
 
@@ -47,7 +48,9 @@ pub mod tests {
         name: String,
         prep_param: FS::PreprocessorParam,
     ) -> Result<(), Error> {
-        let mut rng = ark_std::test_rng();
+        // the FoldingScheme API requires a CryptoRng, so use a deterministically seeded StdRng
+        // instead of `ark_std::test_rng`
+        let mut rng = StdRng::seed_from_u64(0);
         let F_circuit = FC::new(())?;
 
         let fs_params = FS::preprocess(&mut rng, &prep_param)?;

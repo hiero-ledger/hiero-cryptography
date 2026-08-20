@@ -204,6 +204,7 @@ impl<C: Curve>
 pub mod tests {
     use ark_pallas::{Fr, Projective};
     use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
+    use ark_std::rand::{rngs::StdRng, SeedableRng};
     use ark_vesta::Projective as Projective2;
 
     use super::*;
@@ -215,7 +216,7 @@ pub mod tests {
 
     #[test]
     fn test_decider_circuit() -> Result<(), Error> {
-        let mut rng = ark_std::test_rng();
+        let mut rng = StdRng::seed_from_u64(0);
         let poseidon_config = poseidon_canonical_config::<Fr>();
 
         let F_circuit = CubicFCircuit::<Fr>::new(())?;

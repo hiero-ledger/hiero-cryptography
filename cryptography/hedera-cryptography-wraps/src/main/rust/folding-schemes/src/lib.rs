@@ -181,7 +181,7 @@ pub trait FoldingScheme<
     ) -> Result<Self::VerifierParam, Error>;
 
     fn preprocess(
-        rng: impl RngCore,
+        rng: impl RngCore + CryptoRng,
         prep_param: &Self::PreprocessorParam,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
@@ -193,7 +193,7 @@ pub trait FoldingScheme<
 
     fn prove_step(
         &mut self,
-        rng: impl RngCore,
+        rng: impl RngCore + CryptoRng,
         external_inputs: FC::ExternalInputs,
         other_instances: Option<Self::MultiCommittedInstanceWithWitness>,
     ) -> Result<(), Error>;

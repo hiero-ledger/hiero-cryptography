@@ -1483,12 +1483,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn wraps_simulation() {
-        let num_steps = 10;
-        let load_params_from_disk = true;
-
-        let (wraps_pk, wraps_vk) = if load_params_from_disk {
+    // Loads the Nova + decider parameters used by the end-to-end simulations, either from the
+    // artifacts under `resources/local` or by running a fresh trusted setup.
+    fn load_wraps_params(load_params_from_disk: bool) -> (ProvingKey, VerificationKey) {
+        if load_params_from_disk {
             let start = std::time::Instant::now();
             let cwd = env::current_dir().unwrap();
             let nova_pp_bytes = std::fs::read(cwd.join("resources/local/nova_pp.bin")).unwrap();
@@ -1507,7 +1505,15 @@ mod tests {
             let (wraps_pk, wraps_vk) = WRAPSPreprocessing::trusted_wraps_setup().unwrap();
             println!("Generated all parameters: {:?}", start.elapsed());
             (wraps_pk, wraps_vk)
-        };
+        }
+    }
+
+    #[test]
+    fn wraps_simulation() {
+        let num_steps = 5;
+        let load_params_from_disk = true;
+
+        let (wraps_pk, wraps_vk) = load_wraps_params(load_params_from_disk);
 
         // Build genesis address book and keys
         let (genesis_ab, genesis_keys) = create_new_addressbook();
@@ -1590,6 +1596,120 @@ mod tests {
             prev_keys = next_keys;
             prev_uncompressed_wraps_proof = next_uncompressed;
         }
+    }
+
+    // Same simulation as `wraps_simulation` for the first `SUFFICIENT_STEPS` rotations, after
+    // which the committee stops reaching the threshold: only about one third of the total weight
+    // signs each remaining rotation, instead of the required one half. Every step from then on
+    // must be rejected, so the chain stops advancing at `SUFFICIENT_STEPS`.
+    #[test]
+    fn wraps_simulation_fails_below_weight_threshold() {
+        const SUFFICIENT_STEPS: usize = 4;
+        let num_steps = 10;
+        let load_params_from_disk = true;
+
+        let (wraps_pk, wraps_vk) = load_wraps_params(load_params_from_disk);
+
+        // Build genesis address book and keys
+        let (genesis_ab, genesis_keys) = create_new_addressbook();
+        let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
+        let compressed_vk_bytes = WRAPS::get_compressed_verification_key_bytes(&wraps_vk).unwrap();
+
+        // -------------------------------- Global State across loop iterations --------------------------------
+        let mut prev_uncompressed_wraps_proof = vec![];
+        let mut proven_steps = 0;
+
+        let (mut prev_ab, mut prev_keys) = (genesis_ab, genesis_keys);
+        for i in 0..num_steps {
+            let (next_ab, next_keys) = if i == 0 {
+                (prev_ab.clone(), prev_keys.clone())
+            } else {
+                create_new_addressbook()
+            };
+
+            // dummy TSS vk bytes, but let's pick a new one each day at least
+            let next_tss_vk = [i as u8; 1480];
+
+            // message being signed via threshold Schnorr
+            let message: Vec<u8> = WRAPS::compute_rotation_message(&next_ab, &next_tss_vk).unwrap();
+
+            // The first `SUFFICIENT_STEPS` rotations gather more than half of the weight; the rest
+            // only gather about a third of it, which is below the threshold the circuit enforces.
+            let has_sufficient_weight = i < SUFFICIENT_STEPS;
+            let bitvector = if has_sufficient_weight {
+                sufficient_bitvector(&prev_ab)
+            } else {
+                insufficient_bitvector(&prev_ab)
+            };
+
+            // simulate the signing protocol
+            let multi_signature = threshold_sign(&message, &prev_ab, &prev_keys, &bitvector);
+            // Sanity check the premise of this test: the aggregate signature is only acceptable
+            // while the signing subset carries more than half of the total weight.
+            assert_eq!(
+                WRAPS::verify_signature(&prev_ab, &message, &multi_signature).unwrap(),
+                has_sufficient_weight,
+                "step {}: signature acceptance should follow whether the weight threshold is met",
+                i,
+            );
+
+            // kick off proof construction
+            let start = std::time::Instant::now();
+            let result = WRAPS::construct_wraps_proof(
+                &wraps_pk,
+                &wraps_vk,
+                &ab_genesis_hash,
+                &prev_ab,
+                &next_ab,
+                if i == 0 { None } else { Some(prev_uncompressed_wraps_proof.clone()) },
+                &next_tss_vk,
+                &multi_signature,
+            );
+            println!("Step {} WRAPS proof attempt: {:?}", i, start.elapsed());
+
+            if !has_sufficient_weight {
+                // This step must fail, and it must fail because of the weight threshold rather
+                // than because of some unrelated inconsistency in the inputs.
+                match result {
+                    Err(WRAPSError::InvalidInput(msg)) => assert!(
+                        msg.contains("Schnorr multisignature verification failed"),
+                        "step {}: expected a threshold rejection, got: {}",
+                        i,
+                        msg,
+                    ),
+                    Err(e) => panic!("step {}: expected a threshold rejection, got {:?}", i, e),
+                    Ok(_) => panic!(
+                        "step {}: WRAPS proof construction should fail with only a third of the weight signing",
+                        i,
+                    ),
+                }
+                // A rejected rotation does not advance the chain: the address book, the keys and
+                // the running IVC proof all stay as they were, so the next step retries from here.
+                continue;
+            }
+
+            let (next_uncompressed, next_compressed) =
+                result.expect("WRAPS proof should be created");
+            let verified = WRAPS::verify_compressed_wraps_proof(
+                &compressed_vk_bytes,
+                &next_compressed,
+                &ab_genesis_hash,
+                &next_tss_vk,
+            ).unwrap();
+            assert!(verified, "step {}: decider proof failed to verify", i);
+
+            prev_ab = next_ab;
+            prev_keys = next_keys;
+            prev_uncompressed_wraps_proof = next_uncompressed;
+            proven_steps += 1;
+        }
+
+        // Only the steps that reached the threshold advanced the chain.
+        assert_eq!(
+            proven_steps, SUFFICIENT_STEPS,
+            "exactly the first {} steps should have produced a proof",
+            SUFFICIENT_STEPS,
+        );
     }
 
     #[test]

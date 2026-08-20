@@ -351,6 +351,7 @@ pub mod tests {
     // curves instead.
     use ark_mnt4_298::{Fr, G1Projective as Projective, MNT4_298 as MNT4};
     use ark_mnt6_298::{G1Projective as Projective2, MNT6_298 as MNT6};
+    use ark_std::rand::{rngs::StdRng, SeedableRng};
     use std::time::Instant;
 
     use super::*;
@@ -381,7 +382,7 @@ pub mod tests {
             N, // here we define the FoldingScheme to use
         >;
 
-        let mut rng = ark_std::test_rng();
+        let mut rng = StdRng::seed_from_u64(0);
         let poseidon_config = poseidon_canonical_config::<Fr>();
 
         let F_circuit = CubicFCircuit::<Fr>::new(())?;

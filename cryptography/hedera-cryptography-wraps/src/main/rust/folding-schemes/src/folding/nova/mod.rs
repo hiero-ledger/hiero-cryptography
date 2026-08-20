@@ -16,7 +16,12 @@ use ark_relations::gr1cs::{
     ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, SynthesisError, SynthesisMode,
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
-use ark_std::{cmp::max, fmt::Debug, rand::RngCore, One, UniformRand, Zero};
+use ark_std::{
+    cmp::max,
+    fmt::Debug,
+    rand::{CryptoRng, RngCore},
+    One, UniformRand, Zero,
+};
 
 use crate::arith::{
     r1cs::{extract_r1cs, extract_w_x, R1CS},
@@ -563,7 +568,7 @@ where
     }
 
     fn preprocess(
-        mut rng: impl RngCore,
+        mut rng: impl RngCore + CryptoRng,
         prep_param: &Self::PreprocessorParam,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
         let (r1cs, cf_r1cs) =
@@ -671,7 +676,7 @@ where
     /// Implements IVC.P of Nova+CycleFold
     fn prove_step(
         &mut self,
-        mut rng: impl RngCore,
+        mut rng: impl RngCore + CryptoRng,
         external_inputs: FC::ExternalInputs,
         // Nova does not support multi-instances folding (by design)
         _other_instances: Option<Self::MultiCommittedInstanceWithWitness>,
@@ -1033,6 +1038,7 @@ pub mod tests {
     use crate::commitment::kzg::KZG;
     use ark_bn254::{Bn254, Fr, G1Projective as Projective};
     use ark_grumpkin::Projective as Projective2;
+    use ark_std::rand::{rngs::StdRng, SeedableRng};
 
     use super::*;
     use crate::commitment::pedersen::Pedersen;
@@ -1087,7 +1093,7 @@ pub mod tests {
         ),
         Error,
     > {
-        let mut rng = ark_std::test_rng();
+        let mut rng = StdRng::seed_from_u64(0);
 
         let prep_param =
             PreprocessorParam::<Projective, Projective2, CubicFCircuit<Fr>, CS1, CS2, H> {

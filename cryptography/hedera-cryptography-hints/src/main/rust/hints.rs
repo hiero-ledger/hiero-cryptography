@@ -230,6 +230,28 @@ pub struct VerificationKey {
     z_of_tau_com: G2AffinePoint,
 }
 
+/// checks whether the CRS carries enough powers in both towers for a universe of size n.
+///
+/// Phrased as `n >= len` rather than `len - 1 < n` because release builds have overflow
+/// checks off: an empty tower wraps the subtraction to usize::MAX, which makes the check
+/// pass for every n. Both towers matter since we commit in G1 and G2.
+fn crs_supports(crs: &CRS, n: usize) -> bool {
+    n < crs.powers_of_g.len() && n < crs.powers_of_h.len()
+}
+
+/// checks whether an aggregation key's parallel vectors all agree with its n.
+///
+/// n bounds the party index for every one of these vectors, and consumers index them by
+/// party id having only range-checked against n. Deserialization reads n and the vectors
+/// as independent fields, so nothing else ties them together.
+fn aggregation_key_is_well_formed(ak: &AggregationKey) -> bool {
+    ak.weights.len() == ak.n
+        && ak.pks.len() == ak.n
+        && ak.qz_terms.len() == ak.n
+        && ak.qx_terms.len() == ak.n
+        && ak.qx_mul_tau_terms.len() == ak.n
+}
+
 pub struct HinTS;
 
 impl HinTS {
@@ -275,7 +297,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -375,7 +397,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -481,7 +503,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -564,6 +586,14 @@ impl HinTS {
             qx_mul_tau_terms: qx_mul_tau_contributions,
         };
 
+        // we are the only producer of aggregation keys, so a mismatch here is our own bug;
+        // fail before it reaches state, where it would be permanent
+        if !aggregation_key_is_well_formed(&ak) {
+            return Err(HinTSError::CryptographyCatastrophe(
+                format!("preprocess produced an inconsistent aggregation key for n = {}", n))
+            );
+        }
+
         Ok((vk, ak))
     }
 
@@ -585,6 +615,13 @@ impl HinTS {
         // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(ak.n) {
             return Err(HinTSError::InvalidNetworkSize(ak.n));
+        }
+
+        // the range check below is against n, so n must actually describe the key
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", ak.n))
+            );
         }
 
         // party_id can only be between 0 and n-2, inclusive
@@ -609,6 +646,13 @@ impl HinTS {
         // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(ak.n) {
             return Err(HinTSError::InvalidNetworkSize(ak.n));
+        }
+
+        // the range check below is against n, so n must actually describe the key
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", ak.n))
+            );
         }
 
         // check that the two lists are of the same size
@@ -644,9 +688,16 @@ impl HinTS {
     ) -> Result<ThresholdSignature, HinTSError> {
         let n = ak.n;
 
+        // everything below sizes buffers and indexes the key's vectors off n
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", n))
+            );
+        }
+
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -850,6 +901,11 @@ impl HinTS {
         π: &ThresholdSignature,
         fraction: (F, F), // e.g. (1,3) to denote 1/3 threshold
     ) -> Result<bool, HinTSError> {
+        // Every other entry point checks this; verify was the exception. n = 0 divides by
+        // zero below, and a non-power-of-two n makes the evaluation domain disagree with the
+        // vanishing polynomial we compute from it.
+        check_or_return_false!(utils::is_n_valid(vk.n));
+
         // Zero aggregate values satisfy the BLS pairing equation trivially.
         check_or_return_false!(!π.agg_pk.is_zero());
         check_or_return_false!(!π.agg_sig.is_zero());
@@ -1409,5 +1465,89 @@ mod tests {
             bitmap.push(F::from(bit));
         }
         bitmap
+    }
+
+    /// A key whose n disagrees with its vectors must be rejected by every consumer, rather
+    /// than indexing past the end of pks / weights.
+    #[test]
+    fn test_rejects_aggregation_key_with_short_vectors() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (crs, ak, vk, sks, _epks) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let sig = HinTS::sign(msg, &sks[0]).unwrap();
+
+        // sanity: the honest key is accepted
+        assert!(HinTS::partial_verify(msg, &ak, 0, &sig).unwrap());
+
+        let mut short = ak.clone();
+        short.pks.pop();
+
+        assert!(HinTS::partial_verify(msg, &short, 0, &sig).is_err());
+        assert!(HinTS::partial_verify_batch(msg, &short, [0usize], [sig]).is_err());
+        assert!(HinTS::aggregate(&crs, &short, &vk, &sigs).is_err());
+    }
+
+    /// An oversized n paired with empty vectors is the shape that would otherwise reach the
+    /// bitmap allocation in aggregate and request terabytes.
+    #[test]
+    fn test_rejects_aggregation_key_with_oversized_n() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (_crs, _ak, vk, sks, _epks) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+
+        let empty_crs = CRS { powers_of_g: vec![], powers_of_h: vec![] };
+        let huge = AggregationKey {
+            n: 1 << 40,
+            weights: vec![],
+            pks: vec![],
+            qz_terms: vec![],
+            qx_terms: vec![],
+            qx_mul_tau_terms: vec![],
+        };
+
+        assert!(HinTS::aggregate(&empty_crs, &huge, &vk, &sigs).is_err());
+    }
+
+    /// An empty g tower used to satisfy the size check by wrapping `len() - 1`, and
+    /// verify_hint then indexed powers_of_g[0] directly. The h tower is left intact so the
+    /// commitments along the way still succeed and execution reaches that index.
+    #[test]
+    fn test_rejects_crs_with_empty_g_tower() {
+        let universe_n = 32;
+
+        let (crs, _ak, _vk, _sks, epks) = sample_universe(universe_n);
+
+        let no_g = CRS { powers_of_g: vec![], powers_of_h: crs.powers_of_h.clone() };
+        assert!(HinTS::verify_hint(&no_g, universe_n, 0, &epks[0]).is_err());
+
+        // and the h tower is checked too, which it previously never was
+        let no_h = CRS { powers_of_g: crs.powers_of_g.clone(), powers_of_h: vec![] };
+        assert!(HinTS::verify_hint(&no_h, universe_n, 0, &epks[0]).is_err());
+    }
+
+    /// verify now rejects a degenerate n up front. Note this only pins the early rejection:
+    /// with a proof built for the honest key the openings check already returns false before
+    /// execution reaches the division by vk.n, so it is not a regression test for that panic.
+    #[test]
+    fn test_verify_rejects_degenerate_n() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (crs, ak, vk, sks, _epks) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sigs).unwrap();
+
+        // sanity: the honest key verifies
+        assert!(HinTS::verify(msg, &vk, &π, (F::from(1), F::from(2))).unwrap());
+
+        for bad_n in [0usize, 1, 3] {
+            let mut bad_vk = vk.clone();
+            bad_vk.n = bad_n;
+            assert!(!HinTS::verify(msg, &bad_vk, &π, (F::from(1), F::from(2))).unwrap());
+        }
     }
 }

@@ -7,6 +7,14 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+// Every JNI entry point wraps its body in catch_unwind so a panic becomes a false or null
+// return instead of killing the JVM. Those guards are inert under panic = "abort", and the
+// setting lives in one line of Cargo.toml, so fail the build rather than ship them silently
+// disabled. This cannot be a test: cargo forces unwind for the test profile regardless of
+// what release is set to.
+#[cfg(panic = "abort")]
+compile_error!("WRAPS JNI entry points rely on catch_unwind, which is inert under panic=abort");
+
 mod signature;
 mod random_oracle;
 mod utils;
@@ -1375,6 +1383,17 @@ mod tests {
 
     use super::*;
     use std::{env, path::PathBuf};
+
+    /// Every length prefix we deserialize is attacker supplied, so arkworks pre-sizing a Vec
+    /// from one would be an allocation-abort primitive that catch_unwind cannot catch. This
+    /// pins the behaviour rather than a version: published ark-serialize 0.5.0 does pre-size
+    /// and we only avoid it via the [patch.crates-io] pin to git, so dropping that patch
+    /// would reintroduce it silently.
+    #[test]
+    fn test_vec_deserialization_does_not_preallocate() {
+        let huge_length_prefix = (1u64 << 40).to_le_bytes();
+        assert!(Vec::<Fr>::deserialize_compressed(huge_length_prefix.as_slice()).is_err());
+    }
 
     fn create_new_addressbook() -> (AddressBook, Keys) {
         let rng = &mut thread_rng();

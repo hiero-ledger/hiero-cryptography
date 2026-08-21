@@ -81,10 +81,16 @@ unsafe impl GlobalAlloc for MemmapAllocator {
             // Try the map
             let num_of_blocks = (layout.size() + BLOCK_SIZE_BYTES - 1) / BLOCK_SIZE_BYTES;
 
-            // lock() will block until the mutex is available, so it's safe to unwrap().
-            // If the lock indeed fails and the Result is an Err then we're already in a bigger trouble.
+            // lock() blocks until the mutex is available; the only way it returns Err is
+            // poisoning, i.e. a panic while the guard was held. Recover rather than unwrap:
+            // in a global allocator a poisoned mutex means every later allocation of this
+            // size panics, the panic machinery allocates, and we double panic into an abort
+            // that no catch_unwind can stop. Nothing under the guard can panic today, so
+            // recovering the bitmap is safe.
             // Also, put inside {} to release the lock ASAP.
-            let index = { self.bit_map.lock().unwrap().alloc(num_of_blocks) };
+            let index = {
+                self.bit_map.lock().unwrap_or_else(|e| e.into_inner()).alloc(num_of_blocks)
+            };
             if index < NUM_OF_BLOCKS {
                 // unwrap() is safe because we checked is_some() above:
                 return self.file_map.get_map().unwrap().as_mut_ptr().add(index * BLOCK_SIZE_BYTES)
@@ -111,9 +117,12 @@ unsafe impl GlobalAlloc for MemmapAllocator {
                 // and we happen to build this code on Windows. So unfortunately, we cannot use this:
                 // let _ = self.file_map.get_map().unwrap().unchecked_advise_range(UncheckedAdvice::DontNeed, offset, layout.size());
 
-                // lock() will block until the mutex is available, so it's safe to unwrap().
-                // If the lock indeed fails and the Result is an Err then we're already in a bigger trouble.
-                self.bit_map.lock().unwrap().dealloc(index, num_of_blocks);
+                // lock() blocks until the mutex is available; Err means poisoning. Recover
+                // rather than unwrap, for the same reason as in alloc() above.
+                self.bit_map
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .dealloc(index, num_of_blocks);
                 return;
             }
         }

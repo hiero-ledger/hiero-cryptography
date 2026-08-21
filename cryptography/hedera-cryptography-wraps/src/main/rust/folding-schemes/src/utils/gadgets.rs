@@ -12,6 +12,20 @@ use core::borrow::Borrow;
 
 use crate::utils::vec::SparseMatrix;
 
+/// Checks at synthesis time that the given lengths are all equal, and returns
+/// `SynthesisError::Unsatisfiable` otherwise.
+///
+/// This is meant to be called before zipping vectors that are expected to line
+/// up element by element: `zip` stops at the shortest of its operands, so
+/// without this check the elements that only the longer ones have would go
+/// silently unconstrained.
+pub fn check_same_lengths<const N: usize>(lengths: [usize; N]) -> Result<(), SynthesisError> {
+    if lengths.windows(2).any(|w| w[0] != w[1]) {
+        return Err(SynthesisError::Unsatisfiable);
+    }
+    Ok(())
+}
+
 /// `EquivalenceGadget` enforces that two in-circuit variables are equivalent,
 /// where the equivalence relation is parameterized by `M`:
 /// - For `FpVar`, it is simply an equality relation, and `M` is unused.
@@ -162,6 +176,18 @@ mod tests {
     use ark_relations::gr1cs::ConstraintSystem;
 
     use super::*;
+
+    #[test]
+    fn test_check_same_lengths() -> Result<(), SynthesisError> {
+        check_same_lengths([])?;
+        check_same_lengths([2])?;
+        check_same_lengths([2, 2, 2])?;
+
+        assert!(check_same_lengths([2, 2, 3]).is_err());
+        assert!(check_same_lengths([3, 2, 2]).is_err());
+        assert!(check_same_lengths([2, 0]).is_err());
+        Ok(())
+    }
 
     /// Enforcing equivalence between slices of different lengths must fail,
     /// rather than constraining only the common prefix and leaving the

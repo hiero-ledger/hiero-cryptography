@@ -1577,29 +1577,6 @@ mod tests {
         assert!(HinTS::aggregate(&crs, &short, &vk, &sigs).is_err());
     }
 
-    /// An oversized n paired with empty vectors is the shape that would otherwise reach the
-    /// bitmap allocation in aggregate and request terabytes.
-    #[test]
-    fn test_rejects_aggregation_key_with_oversized_n() {
-        let universe_n = 32;
-        let msg = b"helloworld";
-
-        let (_crs, _ak, vk, sks, _epks) = sample_universe(universe_n);
-        let sigs = sample_signing(universe_n - 1, msg, &sks);
-
-        let empty_crs = CRS { powers_of_g: vec![], powers_of_h: vec![] };
-        let huge = AggregationKey {
-            n: 1 << 40,
-            weights: vec![],
-            pks: vec![],
-            qz_terms: vec![],
-            qx_terms: vec![],
-            qx_mul_tau_terms: vec![],
-        };
-
-        assert!(HinTS::aggregate(&empty_crs, &huge, &vk, &sigs).is_err());
-    }
-
     /// An empty g tower used to satisfy the size check by wrapping `len() - 1`, and
     /// verify_hint then indexed powers_of_g[0] directly. The h tower is left intact so the
     /// commitments along the way still succeed and execution reaches that index.

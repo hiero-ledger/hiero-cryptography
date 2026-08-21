@@ -662,6 +662,15 @@ impl HinTS {
             ));
         }
 
+        // an empty batch verifies vacuously: add() returns the identity in both groups, so the
+        // pairing check below collapses to 1_GT == 1_GT and we would report success without
+        // having verified anything. Wrong direction to fail in.
+        if signer_ids.as_ref().is_empty() {
+            return Err(HinTSError::InvalidInput(
+                "signer_ids must not be empty".to_string(),
+            ));
+        }
+
         // ensure all signer_ids are within the valid range
         if signer_ids.as_ref().iter().any(|&id| id >= ak.n - 1) {
             return Err(HinTSError::InvalidInput(
@@ -1475,6 +1484,25 @@ mod tests {
     fn test_vec_deserialization_does_not_preallocate() {
         let huge_length_prefix = (1u64 << 40).to_le_bytes();
         assert!(Vec::<F>::deserialize_uncompressed(huge_length_prefix.as_slice()).is_err());
+    }
+
+    /// An empty batch used to report success: add() gives the identity in both groups, so the
+    /// pairing check collapsed to 1_GT == 1_GT. The Java bridge already rejects an empty party
+    /// list, so this only aligns the Rust API with the policy in front of it.
+    #[test]
+    fn test_rejects_empty_batch() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (_crs, ak, _vk, sks, _epks) = sample_universe(universe_n);
+        let sig = HinTS::sign(msg, &sks[0]).unwrap();
+
+        // sanity: a real single-signer batch still verifies
+        assert!(HinTS::partial_verify_batch(msg, &ak, [0usize], [sig]).unwrap());
+
+        let no_ids: [usize; 0] = [];
+        let no_sigs: [PartialSignature; 0] = [];
+        assert!(HinTS::partial_verify_batch(msg, &ak, no_ids, no_sigs).is_err());
     }
 
     /// A key whose n disagrees with its vectors must be rejected by every consumer, rather

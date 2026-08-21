@@ -7,6 +7,14 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+// Every JNI entry point wraps its body in catch_unwind so a panic becomes a false or null
+// return instead of killing the JVM. Those guards are inert under panic = "abort", and the
+// setting lives in one line of Cargo.toml, so fail the build rather than ship them silently
+// disabled. This cannot be a test: cargo forces unwind for the test profile regardless of
+// what release is set to.
+#[cfg(panic = "abort")]
+compile_error!("WRAPS JNI entry points rely on catch_unwind, which is inert under panic=abort");
+
 mod signature;
 mod random_oracle;
 mod utils;
@@ -140,6 +148,18 @@ pub const ENTROPY_SIZE: usize = 32; // size of the seed for key generation
 /// We can only support address books up to this size.
 const MAX_AB_SIZE: usize = 128;
 
+/// Width of the IVC folding state: the address book hash and the hinTS vk hash.
+const IVC_STATE_LEN: usize = 2;
+
+/// Number of commitments Nova carries per instance, i.e. what `get_commitments` returns.
+const IVC_COMMITMENT_COUNT: usize = 2;
+
+// Not a tunable knob. The step function returns a two element vector literally, and the
+// genesis initial_state is a two element literal, so raising this alone would produce a
+// circuit whose declared state width disagrees with the state it actually folds.
+const _: () = assert!(IVC_STATE_LEN == 2);
+const _: () = assert!(IVC_COMMITMENT_COUNT == 2);
+
 type PairingCurve = ark_bn254::Bn254;
 type G1 = ark_bn254::G1Projective;
 type G2 = ark_grumpkin::Projective;
@@ -264,7 +284,7 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
 
     fn state_len(&self) -> usize {
         // The folding state tracks the current address-book hash and hints hash.
-        2
+        IVC_STATE_LEN
     }
 
     /// generates the constraints for the step of F for the given z_i
@@ -1323,6 +1343,20 @@ impl WRAPS {
         let compressed_proof = ProofData::deserialize_compressed(proof_serialized.as_slice())
             .map_err(|_| WRAPSError::CryptographyError)?;
 
+        // The proof only pins the total length of these four vectors, not how it is split
+        // between them, and they are indexed below and inside the decider. Exact lengths:
+        // a proof re-split as z_0 = [a], z_i = [b, c, d] still satisfies the SNARK check
+        // but makes z_i[1] read the wrong field.
+        // Not redundant with Groth16's own public-input length check: that runs after the
+        // decider has already indexed these vectors, so it cannot protect them.
+        if compressed_proof.z_0.len() != IVC_STATE_LEN
+            || compressed_proof.z_i.len() != IVC_STATE_LEN
+            || compressed_proof.U_i_commitments.len() != IVC_COMMITMENT_COUNT
+            || compressed_proof.u_i_commitments.len() != IVC_COMMITMENT_COUNT
+        {
+            return Err(WRAPSError::CryptographyError);
+        }
+
         // Does the i-th state of IVC have the expected hints_vk?
         let hints_vk_verified = compressed_proof.z_i[1] == hash_hints_vk(hints_vk.as_ref())?;
         // Does the initial state of IVC have the expected genesis ledger ID?
@@ -1351,6 +1385,16 @@ mod tests {
 
     use super::*;
     use std::{env, path::PathBuf};
+
+    /// Deserialization must size a collection from what it actually reads, not from the
+    /// declared length prefix, which is untrusted and unbounded. This pins the behaviour
+    /// rather than a version: the pinned revision does not pre-size, a released one does,
+    /// so a dependency change could alter it with no change here. Don't relax this test.
+    #[test]
+    fn test_vec_deserialization_does_not_preallocate() {
+        let huge_length_prefix = (1u64 << 40).to_le_bytes();
+        assert!(Vec::<Fr>::deserialize_compressed(huge_length_prefix.as_slice()).is_err());
+    }
 
     fn create_new_addressbook() -> (AddressBook, Keys) {
         let rng = &mut thread_rng();

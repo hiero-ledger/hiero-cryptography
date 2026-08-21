@@ -230,6 +230,28 @@ pub struct VerificationKey {
     z_of_tau_com: G2AffinePoint,
 }
 
+/// checks whether the CRS carries enough powers in both towers for a universe of size n.
+///
+/// Phrased as `n >= len` rather than `len - 1 < n` because release builds have overflow
+/// checks off: an empty tower wraps the subtraction to usize::MAX, which makes the check
+/// pass for every n. Both towers matter since we commit in G1 and G2.
+fn crs_supports(crs: &CRS, n: usize) -> bool {
+    n < crs.powers_of_g.len() && n < crs.powers_of_h.len()
+}
+
+/// checks whether an aggregation key's parallel vectors all agree with its n.
+///
+/// n bounds the party index for every one of these vectors, and consumers index them by
+/// party id having only range-checked against n. Deserialization reads n and the vectors
+/// as independent fields, so nothing else ties them together.
+fn aggregation_key_is_well_formed(ak: &AggregationKey) -> bool {
+    ak.weights.len() == ak.n
+        && ak.pks.len() == ak.n
+        && ak.qz_terms.len() == ak.n
+        && ak.qx_terms.len() == ak.n
+        && ak.qx_mul_tau_terms.len() == ak.n
+}
+
 pub struct HinTS;
 
 impl HinTS {
@@ -275,7 +297,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -375,7 +397,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -481,7 +503,7 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -564,6 +586,14 @@ impl HinTS {
             qx_mul_tau_terms: qx_mul_tau_contributions,
         };
 
+        // we are the only producer of aggregation keys, so a mismatch here is our own bug;
+        // fail before it reaches state, where it would be permanent
+        if !aggregation_key_is_well_formed(&ak) {
+            return Err(HinTSError::CryptographyCatastrophe(
+                format!("preprocess produced an inconsistent aggregation key for n = {}", n))
+            );
+        }
+
         Ok((vk, ak))
     }
 
@@ -585,6 +615,13 @@ impl HinTS {
         // we require n to be a power of 2, greater than 1
         if !utils::is_n_valid(ak.n) {
             return Err(HinTSError::InvalidNetworkSize(ak.n));
+        }
+
+        // the range check below is against n, so n must actually describe the key
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", ak.n))
+            );
         }
 
         // party_id can only be between 0 and n-2, inclusive
@@ -611,10 +648,26 @@ impl HinTS {
             return Err(HinTSError::InvalidNetworkSize(ak.n));
         }
 
+        // the range check below is against n, so n must actually describe the key
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", ak.n))
+            );
+        }
+
         // check that the two lists are of the same size
         if signer_ids.as_ref().len() != signatures.as_ref().len() {
             return Err(HinTSError::InvalidInput(
                 "signer_ids and signatures must be of the same size".to_string(),
+            ));
+        }
+
+        // an empty batch verifies vacuously: add() returns the identity in both groups, so the
+        // pairing check below collapses to 1_GT == 1_GT and we would report success without
+        // having verified anything. Wrong direction to fail in.
+        if signer_ids.as_ref().is_empty() {
+            return Err(HinTSError::InvalidInput(
+                "signer_ids must not be empty".to_string(),
             ));
         }
 
@@ -644,9 +697,16 @@ impl HinTS {
     ) -> Result<ThresholdSignature, HinTSError> {
         let n = ak.n;
 
+        // everything below sizes buffers and indexes the key's vectors off n
+        if !aggregation_key_is_well_formed(ak) {
+            return Err(HinTSError::InvalidInput(
+                format!("malformed aggregation key: n = {}", n))
+            );
+        }
+
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        if !crs_supports(crs, n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -850,6 +910,11 @@ impl HinTS {
         π: &ThresholdSignature,
         fraction: (F, F), // e.g. (1,3) to denote 1/3 threshold
     ) -> Result<bool, HinTSError> {
+        // Every other entry point checks this; verify was the exception. n = 0 divides by
+        // zero below, and a non-power-of-two n makes the evaluation domain disagree with the
+        // vanishing polynomial we compute from it.
+        check_or_return_false!(utils::is_n_valid(vk.n));
+
         // Zero aggregate values satisfy the BLS pairing equation trivially.
         check_or_return_false!(!π.agg_pk.is_zero());
         check_or_return_false!(!π.agg_sig.is_zero());
@@ -1409,5 +1474,145 @@ mod tests {
             bitmap.push(F::from(bit));
         }
         bitmap
+    }
+
+    /// Deserialization must size a collection from what it actually reads, not from the
+    /// declared length prefix, which is untrusted and unbounded. This pins the behaviour
+    /// rather than a version: the pinned revision does not pre-size, a released one does,
+    /// so a dependency change could alter it with no change here. Don't relax this test.
+    #[test]
+    fn test_vec_deserialization_does_not_preallocate() {
+        let huge_length_prefix = (1u64 << 40).to_le_bytes();
+        assert!(Vec::<F>::deserialize_uncompressed(huge_length_prefix.as_slice()).is_err());
+    }
+
+    /// crs_supports now requires the G2 tower to cover n as well, which nothing checked before.
+    /// That is a widening, so pin that it accepts what every CRS constructor produces rather
+    /// than relying on the towers being equal length by inspection.
+    #[test]
+    fn test_crs_supports_accepts_every_constructor() {
+        for degree in [4usize, 8, 16, 32] {
+            let init = PowersOfTauProtocol::init(degree);
+            assert!(crs_supports(&init, degree), "init({})", degree);
+            assert!(!crs_supports(&init, degree + 1), "init({}) must not claim {}", degree, degree + 1);
+
+            let (contributed, _proof) = PowersOfTauProtocol::contribute(&init, [7u8; 32]).unwrap();
+            assert!(crs_supports(&contributed, degree), "contribute at {}", degree);
+
+            let pruned = PowersOfTauProtocol::prune_crs(&contributed, degree - 1).unwrap();
+            assert!(crs_supports(&pruned, degree - 1), "prune to {}", degree - 1);
+            assert!(!crs_supports(&pruned, degree), "pruned CRS must not claim {}", degree);
+        }
+    }
+
+    /// The check at the end of preprocess fires on our own output, so getting it wrong would be
+    /// a self-inflicted stall rather than a rejected attack: the node would log and skip voting.
+    /// Pin it across sizes and signer densities instead of trusting that every vector is built
+    /// as vec![_; n]. Sparsity matters because absent signers take the zero-key branch.
+    #[test]
+    fn test_preprocess_output_is_well_formed_across_sizes() {
+        for universe_n in [4usize, 8, 16, 32] {
+            let (crs, _ak, _vk, _sks, epks) = sample_universe(universe_n);
+            let weights = sample_weights(universe_n);
+
+            for signers in [universe_n - 1, 0, universe_n / 2] {
+                let mut signer_info = HashMap::new();
+                for i in 0..signers {
+                    signer_info.insert(i, (weights[i], epks[i].clone()));
+                }
+
+                let (_vk, ak) = HinTS::preprocess(universe_n, &crs, &signer_info)
+                    .unwrap_or_else(|e| panic!("n = {}, signers = {}: {:?}", universe_n, signers, e));
+
+                assert_eq!(ak.n, universe_n);
+                assert!(
+                    aggregation_key_is_well_formed(&ak),
+                    "n = {}, signers = {}: lengths {}, {}, {}, {}, {}",
+                    universe_n, signers,
+                    ak.weights.len(), ak.pks.len(), ak.qz_terms.len(),
+                    ak.qx_terms.len(), ak.qx_mul_tau_terms.len()
+                );
+            }
+        }
+    }
+
+    /// An empty batch used to report success: add() gives the identity in both groups, so the
+    /// pairing check collapsed to 1_GT == 1_GT. The Java bridge already rejects an empty party
+    /// list, so this only aligns the Rust API with the policy in front of it.
+    #[test]
+    fn test_rejects_empty_batch() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (_crs, ak, _vk, sks, _epks) = sample_universe(universe_n);
+        let sig = HinTS::sign(msg, &sks[0]).unwrap();
+
+        // sanity: a real single-signer batch still verifies
+        assert!(HinTS::partial_verify_batch(msg, &ak, [0usize], [sig]).unwrap());
+
+        let no_ids: [usize; 0] = [];
+        let no_sigs: [PartialSignature; 0] = [];
+        assert!(HinTS::partial_verify_batch(msg, &ak, no_ids, no_sigs).is_err());
+    }
+
+    /// A key whose n disagrees with its vectors must be rejected by every consumer, rather
+    /// than indexing past the end of pks / weights.
+    #[test]
+    fn test_rejects_aggregation_key_with_short_vectors() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (crs, ak, vk, sks, _epks) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let sig = HinTS::sign(msg, &sks[0]).unwrap();
+
+        // sanity: the honest key is accepted
+        assert!(HinTS::partial_verify(msg, &ak, 0, &sig).unwrap());
+
+        let mut short = ak.clone();
+        short.pks.pop();
+
+        assert!(HinTS::partial_verify(msg, &short, 0, &sig).is_err());
+        assert!(HinTS::partial_verify_batch(msg, &short, [0usize], [sig]).is_err());
+        assert!(HinTS::aggregate(&crs, &short, &vk, &sigs).is_err());
+    }
+
+    /// An empty g tower used to satisfy the size check by wrapping `len() - 1`, and
+    /// verify_hint then indexed powers_of_g[0] directly. The h tower is left intact so the
+    /// commitments along the way still succeed and execution reaches that index.
+    #[test]
+    fn test_rejects_crs_with_empty_g_tower() {
+        let universe_n = 32;
+
+        let (crs, _ak, _vk, _sks, epks) = sample_universe(universe_n);
+
+        let no_g = CRS { powers_of_g: vec![], powers_of_h: crs.powers_of_h.clone() };
+        assert!(HinTS::verify_hint(&no_g, universe_n, 0, &epks[0]).is_err());
+
+        // and the h tower is checked too, which it previously never was
+        let no_h = CRS { powers_of_g: crs.powers_of_g.clone(), powers_of_h: vec![] };
+        assert!(HinTS::verify_hint(&no_h, universe_n, 0, &epks[0]).is_err());
+    }
+
+    /// verify now rejects a degenerate n up front. Note this only pins the early rejection:
+    /// with a proof built for the honest key the openings check already returns false before
+    /// execution reaches the division by vk.n, so it is not a regression test for that panic.
+    #[test]
+    fn test_verify_rejects_degenerate_n() {
+        let universe_n = 32;
+        let msg = b"helloworld";
+
+        let (crs, ak, vk, sks, _epks) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sigs).unwrap();
+
+        // sanity: the honest key verifies
+        assert!(HinTS::verify(msg, &vk, &π, (F::from(1), F::from(2))).unwrap());
+
+        for bad_n in [0usize, 1, 3] {
+            let mut bad_vk = vk.clone();
+            bad_vk.n = bad_n;
+            assert!(!HinTS::verify(msg, &bad_vk, &π, (F::from(1), F::from(2))).unwrap());
+        }
     }
 }

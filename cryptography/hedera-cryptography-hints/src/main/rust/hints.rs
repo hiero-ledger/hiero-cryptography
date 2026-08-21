@@ -1486,6 +1486,56 @@ mod tests {
         assert!(Vec::<F>::deserialize_uncompressed(huge_length_prefix.as_slice()).is_err());
     }
 
+    /// crs_supports now requires the G2 tower to cover n as well, which nothing checked before.
+    /// That is a widening, so pin that it accepts what every CRS constructor produces rather
+    /// than relying on the towers being equal length by inspection.
+    #[test]
+    fn test_crs_supports_accepts_every_constructor() {
+        for degree in [4usize, 8, 16, 32] {
+            let init = PowersOfTauProtocol::init(degree);
+            assert!(crs_supports(&init, degree), "init({})", degree);
+            assert!(!crs_supports(&init, degree + 1), "init({}) must not claim {}", degree, degree + 1);
+
+            let (contributed, _proof) = PowersOfTauProtocol::contribute(&init, [7u8; 32]).unwrap();
+            assert!(crs_supports(&contributed, degree), "contribute at {}", degree);
+
+            let pruned = PowersOfTauProtocol::prune_crs(&contributed, degree - 1).unwrap();
+            assert!(crs_supports(&pruned, degree - 1), "prune to {}", degree - 1);
+            assert!(!crs_supports(&pruned, degree), "pruned CRS must not claim {}", degree);
+        }
+    }
+
+    /// The check at the end of preprocess fires on our own output, so getting it wrong would be
+    /// a self-inflicted stall rather than a rejected attack: the node would log and skip voting.
+    /// Pin it across sizes and signer densities instead of trusting that every vector is built
+    /// as vec![_; n]. Sparsity matters because absent signers take the zero-key branch.
+    #[test]
+    fn test_preprocess_output_is_well_formed_across_sizes() {
+        for universe_n in [4usize, 8, 16, 32] {
+            let (crs, _ak, _vk, _sks, epks) = sample_universe(universe_n);
+            let weights = sample_weights(universe_n);
+
+            for signers in [universe_n - 1, 0, universe_n / 2] {
+                let mut signer_info = HashMap::new();
+                for i in 0..signers {
+                    signer_info.insert(i, (weights[i], epks[i].clone()));
+                }
+
+                let (_vk, ak) = HinTS::preprocess(universe_n, &crs, &signer_info)
+                    .unwrap_or_else(|e| panic!("n = {}, signers = {}: {:?}", universe_n, signers, e));
+
+                assert_eq!(ak.n, universe_n);
+                assert!(
+                    aggregation_key_is_well_formed(&ak),
+                    "n = {}, signers = {}: lengths {}, {}, {}, {}, {}",
+                    universe_n, signers,
+                    ak.weights.len(), ak.pks.len(), ak.qz_terms.len(),
+                    ak.qx_terms.len(), ak.qx_mul_tau_terms.len()
+                );
+            }
+        }
+    }
+
     /// An empty batch used to report success: add() gives the identity in both groups, so the
     /// pairing check collapsed to 1_GT == 1_GT. The Java bridge already rejects an empty party
     /// list, so this only aligns the Rust API with the policy in front of it.

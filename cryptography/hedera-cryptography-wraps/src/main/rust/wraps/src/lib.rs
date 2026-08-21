@@ -1347,6 +1347,8 @@ impl WRAPS {
         // between them, and they are indexed below and inside the decider. Exact lengths:
         // a proof re-split as z_0 = [a], z_i = [b, c, d] still satisfies the SNARK check
         // but makes z_i[1] read the wrong field.
+        // Not redundant with Groth16's own public-input length check: that runs after the
+        // decider has already indexed these vectors, so it cannot protect them.
         if compressed_proof.z_0.len() != IVC_STATE_LEN
             || compressed_proof.z_i.len() != IVC_STATE_LEN
             || compressed_proof.U_i_commitments.len() != IVC_COMMITMENT_COUNT

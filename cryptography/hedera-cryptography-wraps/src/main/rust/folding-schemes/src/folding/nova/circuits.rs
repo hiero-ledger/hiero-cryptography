@@ -31,6 +31,7 @@ use crate::folding::circuits::{
 use crate::folding::traits::{CommittedInstanceVarOps, Dummy};
 use crate::frontend::FCircuit;
 use crate::transcript::TranscriptVar;
+use crate::utils::gadgets::check_same_lengths;
 use crate::Curve;
 
 /// `AugmentedFCircuit` enhances the original step function `F`, so that it can
@@ -159,6 +160,18 @@ where
         let mut transcript = sponge.clone();
 
         let is_basecase = i.is_zero()?;
+
+        // 0. Check the initial state consistency.
+        // In the base case (i.e. `i = 0`), the current state `z_i` must be the
+        // initial state `z_0`. Without this check `z_i` is an unconstrained
+        // witness at `i = 0`: the states are only chained from `i = 1` on, via
+        // the hash in `u_i.x[0]`, so a malicious prover could fold from an
+        // arbitrary state while claiming `z_0` as the initial one.
+        // The length check keeps `conditional_enforce_equal` (which panics on a
+        // length mismatch) from being reached with a malformed `z_0`, whose
+        // length, unlike `z_i`'s, is not validated against `F.state_len()`.
+        check_same_lengths([z_0.len(), z_i.len()])?;
+        z_0.conditional_enforce_equal(&z_i, &is_basecase)?;
 
         // Primary Part
         // P.1. Compute u_i.x
@@ -302,12 +315,14 @@ pub mod tests {
     use ark_bn254::{Fr, G1Projective as Projective};
     use ark_crypto_primitives::sponge::{constraints::AbsorbGadget, poseidon::PoseidonSponge};
     use ark_ff::{BigInteger, PrimeField};
+    use ark_grumpkin::Projective as Projective2;
 
     use ark_r1cs_std::prelude::Boolean;
     use ark_relations::gr1cs::ConstraintSystem;
     use ark_std::UniformRand;
 
     use crate::folding::nova::nifs::nova::ChallengeGadget;
+    use crate::frontend::utils::CubicFCircuit;
     use crate::transcript::{poseidon::poseidon_canonical_config, Transcript};
     use crate::Error;
 
@@ -367,6 +382,53 @@ pub mod tests {
         let rVar = Boolean::le_bits_to_fp(&r_bitsVar)?;
         assert_eq!(rVar.value()?, r);
         assert_eq!(r_bitsVar.value()?, r_bits);
+        Ok(())
+    }
+
+    /// In the base case (`i = 0`) the current state must be the initial state,
+    /// otherwise a malicious prover could fold from an arbitrary state while
+    /// claiming `z_0` as the initial one.
+    #[test]
+    fn test_augmented_f_circuit_basecase_state_consistency() -> Result<(), Error> {
+        type AugmentedCubicFCircuit = AugmentedFCircuit<Projective, Projective2, CubicFCircuit<Fr>>;
+
+        let poseidon_config = poseidon_canonical_config::<Fr>();
+        let F_circuit = CubicFCircuit::<Fr>::new(())?;
+        let z_0 = vec![Fr::from(3u32)];
+
+        // builds an `AugmentedFCircuit` at step `i` with the given state `z_i`,
+        // leaving the rest of the values as dummy ones
+        let augmented_f_circuit = |i: u32, z_i: Vec<Fr>| {
+            let mut circuit = AugmentedCubicFCircuit::empty(&poseidon_config, F_circuit);
+            circuit.i = Some(Fr::from(i));
+            circuit.i_usize = Some(i as usize);
+            circuit.z_0 = Some(z_0.clone());
+            circuit.z_i = Some(z_i);
+            circuit
+        };
+        let is_satisfied = |circuit: AugmentedCubicFCircuit| -> Result<bool, Error> {
+            let cs = ConstraintSystem::<Fr>::new_ref();
+            circuit.generate_constraints(cs.clone())?;
+            Ok(cs.is_satisfied()?)
+        };
+
+        // honest base case, with `z_i = z_0`
+        assert!(is_satisfied(augmented_f_circuit(0, z_0.clone()))?);
+        // malicious base case, starting from a state other than `z_0`
+        let z_i = vec![Fr::from(35u32)];
+        assert!(!is_satisfied(augmented_f_circuit(0, z_i.clone()))?);
+        // at `i > 0` the states are expected to differ, and `z_i` is bound to
+        // `z_0` through the hash in `u_i.x[0]` instead
+        assert!(is_satisfied(augmented_f_circuit(1, z_i))?);
+
+        // a `z_0` that does not match the state length is rejected at synthesis
+        // time, rather than panicking inside `conditional_enforce_equal`
+        let mut circuit = augmented_f_circuit(0, z_0.clone());
+        circuit.z_0 = Some(vec![Fr::from(3u32); 2]);
+        assert!(matches!(
+            is_satisfied(circuit),
+            Err(Error::SynthesisError(SynthesisError::Unsatisfiable))
+        ));
         Ok(())
     }
 }

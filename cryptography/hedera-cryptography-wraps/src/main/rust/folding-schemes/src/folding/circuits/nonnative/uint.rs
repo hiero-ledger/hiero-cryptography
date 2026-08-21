@@ -854,6 +854,9 @@ impl<F: PrimeField, P: Field> InputizeNonNative<F> for P {
 
 impl<F: PrimeField> VectorGadget<NonNativeUintVar<F>> for [NonNativeUintVar<F>] {
     fn add(&self, other: &Self) -> Result<Vec<NonNativeUintVar<F>>, SynthesisError> {
+        if self.len() != other.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
         self.iter()
             .zip(other.iter())
             .map(|(x, y)| x.add_no_align(y))
@@ -861,6 +864,9 @@ impl<F: PrimeField> VectorGadget<NonNativeUintVar<F>> for [NonNativeUintVar<F>] 
     }
 
     fn hadamard(&self, other: &Self) -> Result<Vec<NonNativeUintVar<F>>, SynthesisError> {
+        if self.len() != other.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
         self.iter()
             .zip(other.iter())
             .map(|(x, y)| x.mul_no_align(y))

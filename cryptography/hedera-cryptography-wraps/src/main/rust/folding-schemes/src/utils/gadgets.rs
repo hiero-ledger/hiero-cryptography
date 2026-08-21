@@ -27,6 +27,12 @@ impl<M, F: PrimeField> EquivalenceGadget<M> for FpVar<F> {
 }
 impl<M, T: EquivalenceGadget<M>> EquivalenceGadget<M> for [T] {
     fn enforce_equivalent(&self, other: &Self) -> Result<(), SynthesisError> {
+        // Without this check, `zip` would silently stop at the shorter slice,
+        // leaving the remaining elements of the longer one unconstrained.
+        if self.len() != other.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+
         self.iter()
             .zip(other)
             .try_for_each(|(a, b)| a.enforce_equivalent(b))
@@ -148,4 +154,48 @@ pub fn eval_mle<F: PrimeField>(
         }
     }
     poly[0].clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_bn254::Fr;
+    use ark_relations::gr1cs::ConstraintSystem;
+
+    use super::*;
+
+    /// Enforcing equivalence between slices of different lengths must fail,
+    /// rather than constraining only the common prefix and leaving the
+    /// remaining elements of the longer slice unconstrained.
+    #[test]
+    fn test_enforce_equivalent_rejects_length_mismatch() -> Result<(), SynthesisError> {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let long = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || {
+            Ok(vec![Fr::from(1u32), Fr::from(2u32)])
+        })?;
+        let short = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(vec![Fr::from(1u32)]))?;
+
+        assert!(EquivalenceGadget::<Fr>::enforce_equivalent(&long[..], &short[..]).is_err());
+        assert!(EquivalenceGadget::<Fr>::enforce_equivalent(&short[..], &long[..]).is_err());
+
+        // slices of the same length are still enforced as before
+        EquivalenceGadget::<Fr>::enforce_equivalent(&long[..], &long.clone()[..])?;
+        assert!(cs.is_satisfied()?);
+        Ok(())
+    }
+
+    /// `VectorGadget` operations must reject operands of different lengths
+    /// instead of returning a truncated result.
+    #[test]
+    fn test_vector_gadget_rejects_length_mismatch() -> Result<(), SynthesisError> {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let long = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || {
+            Ok(vec![Fr::from(1u32), Fr::from(2u32)])
+        })?;
+        let short = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(vec![Fr::from(1u32)]))?;
+
+        assert!(VectorGadget::add(&long[..], &short[..]).is_err());
+        assert!(VectorGadget::hadamard(&long[..], &short[..]).is_err());
+        assert_eq!(VectorGadget::add(&long[..], &long.clone()[..])?.len(), 2);
+        Ok(())
+    }
 }

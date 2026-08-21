@@ -245,6 +245,12 @@ impl<C: Curve> NIFSFullGadget<C> {
         // ci2 is assumed to be always with cmE=0, u=1 (checks done previous to this method)
         ci2: CycleFoldCommittedInstanceVar<C>,
     ) -> Result<CycleFoldCommittedInstanceVar<C>, SynthesisError> {
+        // Both instances must have the same number of public inputs, otherwise
+        // `zip` below would silently drop the extra ones when folding `x`.
+        if ci1.x.len() != ci2.x.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+
         // r_nonnat is equal to r_bits just that in a different format
         let r_nonnat = {
             let mut bits = r_bits.clone();
@@ -281,6 +287,11 @@ impl<C: Curve> NIFSFullGadget<C> {
         ci.cmE.enforce_equal(&ci3.cmE)?;
         ci.u.enforce_equal_unaligned(&ci3.u)?;
         ci.cmW.enforce_equal(&ci3.cmW)?;
+        // Without this check, `zip` would stop at the shorter of the two, so a
+        // longer `ci3.x` would have its trailing public inputs unconstrained.
+        if ci.x.len() != ci3.x.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
         for (x, y) in ci.x.iter().zip(ci3.x.iter()) {
             x.enforce_equal_unaligned(y)?;
         }
@@ -696,10 +707,8 @@ impl<C2: Curve, CS2: CommitmentScheme<C2, H>, const H: bool> CycleFoldNIFS<C2, C
         u_i: &CycleFoldCommittedInstance<C2>,
         cmT: &C2, // VerifierAux
     ) -> Result<CycleFoldCommittedInstance<C2>, Error> {
-        Ok(
-            NIFS::<C2, CS2, PoseidonSponge<C2::ScalarField>, H>::fold_committed_instances(
-                r, U_i, u_i, cmT,
-            ),
+        NIFS::<C2, CS2, PoseidonSponge<C2::ScalarField>, H>::fold_committed_instances(
+            r, U_i, u_i, cmT,
         )
     }
 }

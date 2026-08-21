@@ -213,12 +213,13 @@ where
             .enforce_equal(&kzg_challenges)?;
 
         // 7.2. check the claimed evaluations
-        for (((v, _r), c), e) in W_i1
-            .get_openings()
-            .iter()
-            .zip(&kzg_challenges)
-            .zip(&kzg_evaluations)
-        {
+        let openings = W_i1.get_openings();
+        // Without this check, `zip` would stop at the shortest of the three,
+        // silently skipping the evaluation checks of the remaining openings.
+        if [openings.len(), kzg_evaluations.len()] != [kzg_challenges.len(); 2] {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+        for (((v, _r), c), e) in openings.iter().zip(&kzg_challenges).zip(&kzg_evaluations) {
             // The randomness `_r` is currently not used.
             EvalGadget::evaluate_gadget(v, c)?.enforce_equal(e)?;
         }
@@ -293,12 +294,13 @@ impl<C2: Curve> ConstraintSynthesizer<CF1<C2>> for GenericOffchainDeciderCircuit
             .enforce_equal(&kzg_challenges)?;
 
         // 4.2. check the claimed evaluations
-        for (((v, _r), c), e) in cf_W_i
-            .get_openings()
-            .iter()
-            .zip(&kzg_challenges)
-            .zip(&kzg_evaluations)
-        {
+        let openings = cf_W_i.get_openings();
+        // Without this check, `zip` would stop at the shortest of the three,
+        // silently skipping the evaluation checks of the remaining openings.
+        if [openings.len(), kzg_evaluations.len()] != [kzg_challenges.len(); 2] {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+        for (((v, _r), c), e) in openings.iter().zip(&kzg_challenges).zip(&kzg_evaluations) {
             // The randomness `_r` is currently not used.
             EvalGadget::evaluate_gadget(v, c)?.enforce_equal(e)?;
         }

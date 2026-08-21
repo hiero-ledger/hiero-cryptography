@@ -137,6 +137,12 @@ where
         )?;
         let r = Boolean::le_bits_to_fp(&r_bits)?;
 
+        // Both instances must have the same number of public inputs, otherwise
+        // `zip` below would silently drop the extra ones when folding `x`.
+        if U_i.x.len() != u_i.x.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+
         Ok((
             Self::CommittedInstanceVar {
                 cmE: NonNativeAffineVar::new_constant(ConstraintSystemRef::None, C::zero())?,

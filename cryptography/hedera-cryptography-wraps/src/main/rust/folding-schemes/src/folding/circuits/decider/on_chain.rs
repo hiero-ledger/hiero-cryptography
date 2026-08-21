@@ -25,6 +25,7 @@ use crate::{
         traits::{CommittedInstanceOps, CommittedInstanceVarOps, Dummy, WitnessOps, WitnessVarOps},
     },
     transcript::TranscriptVar,
+    utils::gadgets::check_same_lengths,
     Curve,
 };
 
@@ -294,12 +295,9 @@ where
             .enforce_equal(&kzg_challenges)?;
 
         // 7.2. check the claimed evaluations
-        for (((v, _r), c), e) in W_i1
-            .get_openings()
-            .iter()
-            .zip(&kzg_challenges)
-            .zip(&kzg_evaluations)
-        {
+        let openings = W_i1.get_openings();
+        check_same_lengths([openings.len(), kzg_challenges.len(), kzg_evaluations.len()])?;
+        for (((v, _r), c), e) in openings.iter().zip(&kzg_challenges).zip(&kzg_evaluations) {
             // The randomness `_r` is currently not used.
             EvalGadget::evaluate_gadget(v, c)?.enforce_equal(e)?;
         }

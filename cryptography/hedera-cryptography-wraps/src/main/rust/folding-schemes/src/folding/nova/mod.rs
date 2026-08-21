@@ -782,7 +782,7 @@ where
                 let expected =
                     NIFS::<C1, CS1, PoseidonSponge<C1::ScalarField>, H>::fold_committed_instances(
                         r_Fr, &self.U_i, &self.u_i, &cmT,
-                    );
+                    )?;
                 assert_eq!(U_i1, expected);
             }
         } else {

@@ -117,12 +117,9 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         // use r_T=0 since we don't need hiding property for cm(T)
         let rT = C::ScalarField::zero();
         let rE = W_i.rE + r * rT + r2 * w_i.rE;
-        let W: Vec<C::ScalarField> = W_i
-            .W
-            .iter()
-            .zip(&w_i.W)
-            .map(|(a, b)| *a + (r * b))
-            .collect();
+        // `vec_add` errors out on a length mismatch, whereas zipping the two
+        // vectors would silently truncate to the shorter one.
+        let W: Vec<C::ScalarField> = vec_add(&W_i.W, &vec_scalar_mul(&w_i.W, &r))?;
 
         let rW = W_i.rW + r * w_i.rW;
         Ok(Self::Witness { E, rE, W, rW })
@@ -164,7 +161,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
 
         let w = Self::fold_witness(r_Fr, W_i, w_i, &T)?;
 
-        let ci = Self::fold_committed_instances(r_Fr, U_i, u_i, &cmT);
+        let ci = Self::fold_committed_instances(r_Fr, U_i, u_i, &cmT)?;
 
         Ok((w, ci, cmT, r_bits))
     }
@@ -184,7 +181,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         let r = C::ScalarField::from_bigint(BigInteger::from_bits_le(&r_bits))
             .ok_or(Error::OutOfBounds)?;
 
-        Ok((Self::fold_committed_instances(r, U_i, u_i, cmT), r_bits))
+        Ok((Self::fold_committed_instances(r, U_i, u_i, cmT)?, r_bits))
     }
 }
 
@@ -240,19 +237,17 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         U_i: &CommittedInstance<C>,
         u_i: &CommittedInstance<C>,
         cmT: &C,
-    ) -> CommittedInstance<C> {
+    ) -> Result<CommittedInstance<C>, Error> {
         let r2 = r * r;
         let cmE = U_i.cmE + cmT.mul(r) + u_i.cmE.mul(r2);
         let u = U_i.u + r * u_i.u;
         let cmW = U_i.cmW + u_i.cmW.mul(r);
-        let x = U_i
-            .x
-            .iter()
-            .zip(&u_i.x)
-            .map(|(a, b)| *a + (r * b))
-            .collect::<Vec<C::ScalarField>>();
+        // `vec_add` errors out when the two instances do not have the same
+        // number of public inputs, whereas zipping them would silently
+        // truncate to the shorter one.
+        let x = vec_add(&U_i.x, &vec_scalar_mul(&u_i.x, &r))?;
 
-        CommittedInstance { cmE, u, cmW, x }
+        Ok(CommittedInstance { cmE, u, cmW, x })
     }
 
     pub fn prove_commitments(
@@ -288,5 +283,29 @@ pub mod tests {
         let r1cs = get_test_r1cs();
         r1cs.check_relation(&W, &U)?;
         Ok(())
+    }
+
+    /// Folding two instances with a different number of public inputs must be
+    /// rejected, rather than folding only the public inputs that both of them
+    /// happen to have.
+    #[test]
+    fn test_fold_committed_instances_rejects_length_mismatch() {
+        type N = NIFS<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>;
+
+        let U_i = CommittedInstance::<Projective> {
+            cmE: Projective::zero(),
+            u: Fr::from(1u32),
+            cmW: Projective::zero(),
+            x: vec![Fr::from(1u32), Fr::from(2u32)],
+        };
+        let mut u_i = U_i.clone();
+        u_i.x.pop();
+
+        assert!(
+            N::fold_committed_instances(Fr::from(3u32), &U_i, &u_i, &Projective::zero()).is_err()
+        );
+        assert!(
+            N::fold_committed_instances(Fr::from(3u32), &U_i, &U_i, &Projective::zero()).is_ok()
+        );
     }
 }

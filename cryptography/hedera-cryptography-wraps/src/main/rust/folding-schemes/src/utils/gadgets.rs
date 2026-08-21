@@ -12,6 +12,20 @@ use core::borrow::Borrow;
 
 use crate::utils::vec::SparseMatrix;
 
+/// Checks at synthesis time that the given lengths are all equal, and returns
+/// `SynthesisError::Unsatisfiable` otherwise.
+///
+/// This is meant to be called before zipping vectors that are expected to line
+/// up element by element: `zip` stops at the shortest of its operands, so
+/// without this check the elements that only the longer ones have would go
+/// silently unconstrained.
+pub fn check_same_lengths<const N: usize>(lengths: [usize; N]) -> Result<(), SynthesisError> {
+    if lengths.windows(2).any(|w| w[0] != w[1]) {
+        return Err(SynthesisError::Unsatisfiable);
+    }
+    Ok(())
+}
+
 /// `EquivalenceGadget` enforces that two in-circuit variables are equivalent,
 /// where the equivalence relation is parameterized by `M`:
 /// - For `FpVar`, it is simply an equality relation, and `M` is unused.
@@ -27,6 +41,12 @@ impl<M, F: PrimeField> EquivalenceGadget<M> for FpVar<F> {
 }
 impl<M, T: EquivalenceGadget<M>> EquivalenceGadget<M> for [T] {
     fn enforce_equivalent(&self, other: &Self) -> Result<(), SynthesisError> {
+        // Without this check, `zip` would silently stop at the shorter slice,
+        // leaving the remaining elements of the longer one unconstrained.
+        if self.len() != other.len() {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+
         self.iter()
             .zip(other)
             .try_for_each(|(a, b)| a.enforce_equivalent(b))
@@ -148,4 +168,60 @@ pub fn eval_mle<F: PrimeField>(
         }
     }
     poly[0].clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use ark_bn254::Fr;
+    use ark_relations::gr1cs::ConstraintSystem;
+
+    use super::*;
+
+    #[test]
+    fn test_check_same_lengths() -> Result<(), SynthesisError> {
+        check_same_lengths([])?;
+        check_same_lengths([2])?;
+        check_same_lengths([2, 2, 2])?;
+
+        assert!(check_same_lengths([2, 2, 3]).is_err());
+        assert!(check_same_lengths([3, 2, 2]).is_err());
+        assert!(check_same_lengths([2, 0]).is_err());
+        Ok(())
+    }
+
+    /// Enforcing equivalence between slices of different lengths must fail,
+    /// rather than constraining only the common prefix and leaving the
+    /// remaining elements of the longer slice unconstrained.
+    #[test]
+    fn test_enforce_equivalent_rejects_length_mismatch() -> Result<(), SynthesisError> {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let long = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || {
+            Ok(vec![Fr::from(1u32), Fr::from(2u32)])
+        })?;
+        let short = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(vec![Fr::from(1u32)]))?;
+
+        assert!(EquivalenceGadget::<Fr>::enforce_equivalent(&long[..], &short[..]).is_err());
+        assert!(EquivalenceGadget::<Fr>::enforce_equivalent(&short[..], &long[..]).is_err());
+
+        // slices of the same length are still enforced as before
+        EquivalenceGadget::<Fr>::enforce_equivalent(&long[..], &long.clone()[..])?;
+        assert!(cs.is_satisfied()?);
+        Ok(())
+    }
+
+    /// `VectorGadget` operations must reject operands of different lengths
+    /// instead of returning a truncated result.
+    #[test]
+    fn test_vector_gadget_rejects_length_mismatch() -> Result<(), SynthesisError> {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let long = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || {
+            Ok(vec![Fr::from(1u32), Fr::from(2u32)])
+        })?;
+        let short = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(vec![Fr::from(1u32)]))?;
+
+        assert!(VectorGadget::add(&long[..], &short[..]).is_err());
+        assert!(VectorGadget::hadamard(&long[..], &short[..]).is_err());
+        assert_eq!(VectorGadget::add(&long[..], &long.clone()[..])?.len(), 2);
+        Ok(())
+    }
 }

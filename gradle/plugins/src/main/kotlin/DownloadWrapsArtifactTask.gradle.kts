@@ -13,7 +13,7 @@ abstract class DownloadWrapsArtifactTask : DefaultTask() {
     @TaskAction
     fun action() {
         // The version, e.g. "v0.2" for https://builds.hedera.com/tss/hiero/wraps/v0.2/wraps-v0.2.0.tar.gz
-        val ver = "v1.5"
+        val ver = "v1.6"
         val out = wrapsDir.get().dir("${ver}.0")
         files.mkdir(out)
 

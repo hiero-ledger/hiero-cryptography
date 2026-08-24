@@ -20,7 +20,7 @@ public class WRAPSLibraryBridgeTest {
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final byte[][] EMPTY_BYTE_ARRAY_2 = new byte[0][];
 
-    private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 40946264;
+    private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 40946392;
 
     // We use ABs with 4 and 5 entries, so 8 should be good.
     private static final int SIGNERS_NUM = 8;

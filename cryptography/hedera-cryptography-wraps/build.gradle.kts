@@ -40,7 +40,7 @@ tasks.test {
                 (tasks.named("downloadWrapsArtifactTask").get().property("wrapsDir")
                         as DirectoryProperty)
                     .get()
-                    .dir("v1.5.0")
+                    .dir("v1.6.0")
                     .asFile
                     .absolutePath,
 

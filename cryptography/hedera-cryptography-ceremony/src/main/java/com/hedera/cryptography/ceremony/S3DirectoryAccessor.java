@@ -3,6 +3,7 @@ package com.hedera.cryptography.ceremony;
 
 import com.hedera.cryptography.ceremony.s3.S3Client;
 import com.hedera.cryptography.ceremony.s3.S3ResponseException;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,7 +87,9 @@ class S3DirectoryAccessor {
                     continue;
                 }
 
-                final String fileName = object.substring(prefix.length());
+                // The validation ensures that nested subdirectories are NOT supported.
+                // This is by design:
+                final String fileName = validateFileName(object.substring(prefix.length()));
                 s3Client.downloadFile(object, path.resolve(fileName));
             }
 
@@ -94,6 +97,18 @@ class S3DirectoryAccessor {
         } catch (S3ResponseException e) {
             throw new IOException(e);
         }
+    }
+
+    /// Ensure the given fileName is just a file name, w/o any special characters
+    /// such as path separators or double periods.
+    /// @throws IllegalArgumentException if the fileName has invalid characters
+    static String validateFileName(String fileName) {
+        if (fileName.contains(File.pathSeparator) || fileName.contains(File.separator) || fileName.contains("..")) {
+            throw new IllegalArgumentException(
+                    "fileName shouldn't contain path or file separators, or path following characters. Instead got (w/o ` quotes): `"
+                            + fileName + "`");
+        }
+        return fileName;
     }
 
     /// Upload all files from filesDir/* on local disk to bucket/dir/directoryName/ in S3.

@@ -501,6 +501,16 @@ impl HinTS {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
 
+        // the check above only counts the entries; index n-1 is the location reserved above, and
+        // aggregate later overwrites it, so a party sitting there yields keys that verify nothing
+        if let Some(&party_id) = signer_info.keys().find(|&&i| i >= n - 1) {
+            return Err(HinTSError::InvalidInput(format!(
+                "party index {} is not below the reserved index {}",
+                party_id,
+                n - 1
+            )));
+        }
+
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
         if !crs_supports(crs, n) {
@@ -1534,6 +1544,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The signer count check only bounds how many entries there are, not which indices they
+    /// use, so a caller could place a party on the index the scheme reserves for itself. aggregate
+    /// overwrites that slot, so the keys build cleanly and then verify nothing.
+    #[test]
+    fn test_preprocess_rejects_reserved_party_index() {
+        let n = 8usize;
+
+        let (crs, _ak, _vk, sks, epks) = sample_universe(n);
+        let weights = sample_weights(n);
+
+        // hint_gen only rejects i >= n, so a hint for the reserved index verifies like any other.
+        // Without an explicit bound this is what walks past the signer count check.
+        let reserved_epk = HinTS::hint_gen(&crs, n, n - 1, &sks[0]).unwrap();
+
+        // sanity: the same single-signer shape on a normal index is accepted
+        let mut ok = HashMap::new();
+        ok.insert(0usize, (weights[0], epks[0].clone()));
+        assert!(HinTS::preprocess(n, &crs, &ok).is_ok());
+
+        let mut bad = HashMap::new();
+        bad.insert(n - 1, (weights[0], reserved_epk));
+        assert!(HinTS::preprocess(n, &crs, &bad).is_err());
     }
 
     /// An empty batch used to report success: add() gives the identity in both groups, so the

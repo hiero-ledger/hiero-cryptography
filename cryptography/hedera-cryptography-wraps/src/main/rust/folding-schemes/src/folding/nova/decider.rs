@@ -284,6 +284,8 @@ where
         let cf_U = proof.cf_U_final.clone();
 
         // snark proof 1
+        // NOTE: the order here must match the order in which `GenericOffchainDeciderCircuit1`
+        // allocates its public inputs.
         let c1_public_input = [
             &[vp.pp_hash, i][..],
             &z_0,
@@ -293,6 +295,7 @@ where
             &proof.cs1_challenges,
             &proof.cs1_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
             &proof.cmT.inputize_nonnative(),
+            &[proof.r][..],
         ]
         .concat();
 

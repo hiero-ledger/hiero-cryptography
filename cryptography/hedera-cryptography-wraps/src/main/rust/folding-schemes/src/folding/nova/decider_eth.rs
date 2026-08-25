@@ -235,6 +235,8 @@ where
             proof.r,
         )?;
 
+        // NOTE: the order here must match the order in which the decider circuit allocates its
+        // public inputs (see `GenericOnchainDeciderCircuit::generate_constraints`).
         let public_input = [
             &[pp_hash, i][..],
             &z_0,
@@ -243,6 +245,7 @@ where
             &proof.kzg_challenges,
             &proof.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
             &proof.cmT.inputize_nonnative(),
+            &[proof.r][..],
         ]
         .concat();
 
@@ -353,6 +356,110 @@ pub mod tests {
             &proof,
         )?;
         assert!(verified);
+        Ok(())
+    }
+
+    /// Regression: the fold randomness must be bound to the in-circuit Fiat-Shamir challenge.
+    ///
+    /// Before `r` was allocated as a public input, an honest proof could be re-presented with an
+    /// arbitrary `r` by back-solving the running commitments so the native fold landed on the same
+    /// pair, and the verifier could not tell the difference. Now `r` is part of the Groth16 public
+    /// input, so changing it invalidates the proof.
+    #[test]
+    fn test_decider_rejects_tampered_fold_randomness() -> Result<(), Error> {
+        type N = Nova<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            KZG<'static, Bn254>,
+            Pedersen<Projective2>,
+            false,
+        >;
+        type D = Decider<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            KZG<'static, Bn254>,
+            Pedersen<Projective2>,
+            Groth16<Bn254>,
+            N,
+        >;
+
+        let mut rng = ark_std::rand::rngs::OsRng;
+        let poseidon_config = poseidon_canonical_config::<Fr>();
+        let F_circuit = CubicFCircuit::<Fr>::new(())?;
+        let z_0 = vec![Fr::from(3_u32)];
+
+        let preprocessor_param = PreprocessorParam::new(poseidon_config, F_circuit);
+        let nova_params = N::preprocess(&mut rng, &preprocessor_param)?;
+        let mut nova = N::init(&nova_params, F_circuit, z_0.clone())?;
+        let (decider_pp, decider_vp) =
+            D::preprocess(&mut rng, (nova_params, F_circuit.state_len()))?;
+
+        nova.prove_step(&mut rng, (), None)?;
+        nova.prove_step(&mut rng, (), None)?;
+        let proof = D::prove(rng, &decider_pp, nova.clone())?;
+
+        let running = nova.U_i.get_commitments();
+        let incoming = nova.u_i.get_commitments();
+
+        assert!(
+            D::verify(
+                decider_vp.clone(),
+                nova.i,
+                nova.z_0.clone(),
+                nova.z_i.clone(),
+                &running,
+                &incoming,
+                &proof,
+            )?,
+            "honest proof should verify"
+        );
+
+        // Recompute the folded commitments, then pick a different `r` and back-solve the running
+        // commitments so `fold_group_elements_native` still reproduces them.
+        let folded = DeciderNovaGadget::fold_group_elements_native(
+            &running,
+            &incoming,
+            Some(proof.cmT),
+            proof.r,
+        )?;
+        let r_tampered = Fr::from(0xdead_beef_u64);
+        assert_ne!(r_tampered, proof.r, "test is vacuous if r is unchanged");
+        let running_tampered = vec![
+            folded[0] - incoming[0] * r_tampered,
+            folded[1] - proof.cmT * r_tampered,
+        ];
+        assert_ne!(
+            running_tampered, running,
+            "test is vacuous if the running commitments are unchanged"
+        );
+
+        // Rebuilt field-by-field rather than cloned: the derived `Clone` on `Proof` requires
+        // `S: Clone`, which `Groth16` does not implement.
+        let tampered_proof = Proof {
+            snark_proof: proof.snark_proof.clone(),
+            kzg_proofs: proof.kzg_proofs.clone(),
+            cmT: proof.cmT,
+            r: r_tampered,
+            kzg_challenges: proof.kzg_challenges,
+        };
+
+        let result = D::verify(
+            decider_vp,
+            nova.i,
+            nova.z_0.clone(),
+            nova.z_i.clone(),
+            &running_tampered,
+            &incoming,
+            &tampered_proof,
+        );
+
+        assert!(
+            matches!(result, Err(Error::SNARKVerificationFail)),
+            "verifier must reject a proof whose fold randomness was replaced, got {result:?}"
+        );
+
         Ok(())
     }
 

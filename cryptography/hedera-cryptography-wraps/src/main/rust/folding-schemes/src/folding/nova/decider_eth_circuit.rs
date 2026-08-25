@@ -8,6 +8,8 @@ use ark_crypto_primitives::sponge::poseidon::{constraints::PoseidonSpongeVar, Po
 use ark_ff::{BigInteger, PrimeField};
 use ark_r1cs_std::{
     alloc::{AllocVar, AllocationMode},
+    boolean::Boolean,
+    eq::EqGadget,
     fields::fp::FpVar,
     GR1CSVar,
 };
@@ -172,11 +174,17 @@ impl<C: Curve>
         U_vec: Vec<FpVar<CF1<C>>>,
         u: CommittedInstanceVar<C>,
         proof: C,
-        _randomness: CF1<C>,
+        randomness: CF1<C>,
     ) -> Result<CommittedInstanceVar<C>, SynthesisError> {
         let cs = U.u.cs();
         let cmT = NonNativeAffineVar::new_input(cs.clone(), || Ok(proof))?;
-        let (new_U, _) = NIFSGadget::verify(transcript, U, U_vec, u, Some(cmT))?;
+        // `r` is allocated as a public input so that the verifier's `fold_group_elements_native`,
+        // which folds the commitments natively with the caller-supplied randomness, is forced to
+        // use the same value the circuit derived. Without this the native fold is unconstrained:
+        // any (running_commitments, r) landing on the same folded pair would be accepted.
+        let r = FpVar::new_input(cs.clone(), || Ok(randomness))?;
+        let (new_U, r_bits) = NIFSGadget::verify(transcript, U, U_vec, u, Some(cmT))?;
+        Boolean::le_bits_to_fp(&r_bits)?.enforce_equal(&r)?;
         Ok(new_U)
     }
 

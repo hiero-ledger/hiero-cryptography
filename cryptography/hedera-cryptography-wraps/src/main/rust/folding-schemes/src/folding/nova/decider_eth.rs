@@ -212,7 +212,8 @@ where
         i: C1::ScalarField,
         z_0: Vec<C1::ScalarField>,
         z_i: Vec<C1::ScalarField>,
-        // we don't use the instances at the verifier level, since we check them in-circuit
+        // the commitments of these instances are public inputs to the SNARK, where they are
+        // enforced equal to the instances the circuit folded
         running_commitments: &Self::CommittedInstance,
         incoming_commitments: &Self::CommittedInstance,
         proof: &Self::Proof,
@@ -241,6 +242,8 @@ where
             &[pp_hash, i][..],
             &z_0,
             &z_i,
+            &running_commitments.inputize_nonnative(),
+            &incoming_commitments.inputize_nonnative(),
             &U_final_commitments.inputize_nonnative(),
             &proof.kzg_challenges,
             &proof.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
@@ -458,6 +461,198 @@ pub mod tests {
         assert!(
             matches!(result, Err(Error::SNARKVerificationFail)),
             "verifier must reject a proof whose fold randomness was replaced, got {result:?}"
+        );
+
+        Ok(())
+    }
+
+    /// Regression: the commitments the verifier folds natively must be the ones the circuit
+    /// reasoned about.
+    ///
+    /// Binding the fold randomness alone is not sufficient. `U_i` and `u_i` are witnesses, so a
+    /// prover can pick them (fixing the Fiat-Shamir challenge) and then hand the verifier
+    /// unrelated commitments on the wire. This test builds exactly that: a decider witness
+    /// asserting an IVC state the honest fold never reached, with `W_i1.E` set to the relation
+    /// residual so the relaxed R1CS is satisfied for a freely chosen `W`.
+    ///
+    /// Note the decider *circuit* remains satisfiable — it is internally consistent. The rejection
+    /// comes from `U_i`/`u_i`'s commitments now being public inputs, so the wire values must match.
+    #[test]
+    fn test_decider_rejects_unbound_instance_commitments() -> Result<(), Error> {
+        use crate::arith::ArithRelation;
+        use crate::commitment::CommitmentScheme;
+        use crate::folding::circuits::decider::{EvalGadget, KZGChallengesGadget};
+        use crate::folding::nova::nifs::nova::ChallengeGadget;
+        use crate::folding::nova::{CommittedInstance, Witness};
+        use crate::folding::traits::{CommittedInstanceOps as _, WitnessOps as _};
+        use crate::transcript::Transcript;
+        use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
+        use ark_ff::{BigInteger, PrimeField};
+
+        type N = Nova<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            KZG<'static, Bn254>,
+            Pedersen<Projective2>,
+            false,
+        >;
+        type D = Decider<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            KZG<'static, Bn254>,
+            Pedersen<Projective2>,
+            Groth16<Bn254>,
+            N,
+        >;
+
+        let mut rng = ark_std::rand::rngs::OsRng;
+        let poseidon_config = poseidon_canonical_config::<Fr>();
+        let F_circuit = CubicFCircuit::<Fr>::new(())?;
+        let z_0 = vec![Fr::from(3_u32)];
+
+        let preprocessor_param = PreprocessorParam::new(poseidon_config, F_circuit);
+        let nova_params = N::preprocess(&mut rng, &preprocessor_param)?;
+        let mut nova = N::init(&nova_params, F_circuit, z_0.clone())?;
+        let (decider_pp, decider_vp) =
+            D::preprocess(&mut rng, (nova_params, F_circuit.state_len()))?;
+        let (g16_pk, cs_pk) = &decider_pp;
+
+        // An honest run, used only to borrow a valid CycleFold instance and the witness shapes.
+        // Everything it needs is public, so an attacker can do the same locally.
+        nova.prove_step(&mut rng, (), None)?;
+        nova.prove_step(&mut rng, (), None)?;
+        let honest = DeciderEthCircuit::<Projective, Projective2>::try_from(nova.clone())?;
+
+        let z_i_honest = nova.z_i.clone();
+        let z_i_forged = vec![Fr::from(999_u32)];
+        assert_ne!(z_i_forged, z_i_honest, "test is vacuous if the states match");
+        let i_forged = Fr::from(2_u32); // `verify` rejects i <= 1
+
+        let U_i_forged = CommittedInstance::<Projective> {
+            cmE: Projective::zero(),
+            u: Fr::zero(),
+            cmW: Projective::zero(),
+            x: vec![Fr::zero(); honest.U_i.x.len()],
+        };
+
+        let sponge =
+            PoseidonSponge::<Fr>::new_with_pp_hash(&honest.poseidon_config, honest.pp_hash);
+        let mut transcript = sponge.clone();
+
+        let u_i_forged = CommittedInstance::<Projective> {
+            cmE: Projective::zero(),
+            u: Fr::one(),
+            cmW: Projective::zero(),
+            x: vec![
+                U_i_forged.hash(&sponge, i_forged, &z_0, &z_i_forged),
+                honest.u_i.x[1],
+            ],
+        };
+
+        let cmT_forged = Projective::zero();
+        let r_bits = ChallengeGadget::<Projective, CommittedInstance<Projective>>::get_challenge_native(
+            &mut transcript,
+            &U_i_forged,
+            &u_i_forged,
+            Some(&cmT_forged),
+        );
+        let r_forged = Fr::from_bigint(<Fr as PrimeField>::BigInt::from_bits_le(&r_bits)).unwrap();
+
+        let u_i1_u = U_i_forged.u + r_forged * u_i_forged.u;
+        let u_i1_x: Vec<Fr> = U_i_forged
+            .x
+            .iter()
+            .zip(&u_i_forged.x)
+            .map(|(a, b)| *a + r_forged * b)
+            .collect();
+
+        // Choose W freely; set E to the residual so the relaxed relation holds by construction.
+        let W_forged = vec![Fr::zero(); honest.W_i1.W.len()];
+        let E_forged = honest
+            .arith
+            .eval_at_z(&[&[u_i1_u][..], &u_i1_x, &W_forged].concat())?;
+        let W_i1_forged = Witness::<Projective> {
+            E: E_forged,
+            rE: Fr::zero(),
+            W: W_forged,
+            rW: Fr::zero(),
+        };
+        let U_i1_forged = CommittedInstance::<Projective> {
+            cmE: KZG::<Bn254>::commit(cs_pk, &W_i1_forged.E, &Fr::zero())?,
+            u: u_i1_u,
+            cmW: KZG::<Bn254>::commit(cs_pk, &W_i1_forged.W, &Fr::zero())?,
+            x: u_i1_x,
+        };
+        honest
+            .arith
+            .check_relation(&W_i1_forged, &U_i1_forged)
+            .expect("relaxed R1CS accepts the fabricated instance -- this part is unchanged");
+
+        let kzg_challenges =
+            KZGChallengesGadget::get_challenges_native(&mut transcript, &U_i1_forged);
+        let kzg_evaluations = W_i1_forged
+            .get_openings()
+            .iter()
+            .zip(&kzg_challenges)
+            .map(|((v, _), &c)| EvalGadget::evaluate_native(v, c))
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        let circuit = DeciderEthCircuit::<Projective, Projective2> {
+            _avar: core::marker::PhantomData,
+            arith: honest.arith.clone(),
+            cf_arith: honest.cf_arith.clone(),
+            cf_pedersen_params: honest.cf_pedersen_params.clone(),
+            poseidon_config: honest.poseidon_config.clone(),
+            pp_hash: honest.pp_hash,
+            i: i_forged,
+            z_0: z_0.clone(),
+            z_i: z_i_forged.clone(),
+            U_i: U_i_forged.clone(),
+            W_i: honest.W_i.clone(),
+            u_i: u_i_forged.clone(),
+            w_i: honest.w_i.clone(),
+            U_i1: U_i1_forged.clone(),
+            W_i1: W_i1_forged.clone(),
+            proof: cmT_forged,
+            randomness: r_forged,
+            cf_U_i: honest.cf_U_i.clone(),
+            cf_W_i: honest.cf_W_i.clone(),
+            kzg_challenges: kzg_challenges.clone(),
+            kzg_evaluations,
+        };
+
+        let kzg_proofs = W_i1_forged
+            .get_openings()
+            .iter()
+            .zip(&kzg_challenges)
+            .map(|((v, _), &c)| KZG::<Bn254>::prove_with_challenge(cs_pk, c, v, &Fr::zero(), None))
+            .collect::<Result<Vec<_>, _>>()?;
+        let snark_proof = <Groth16<Bn254> as SNARK<Fr>>::prove(g16_pk, circuit, &mut rng)
+            .map_err(|e| Error::Other(e.to_string()))?;
+
+        let forged_proof = Proof {
+            snark_proof,
+            kzg_proofs: kzg_proofs.try_into().unwrap(),
+            cmT: cmT_forged,
+            r: r_forged,
+            kzg_challenges: kzg_challenges.try_into().unwrap(),
+        };
+
+        let result = D::verify(
+            decider_vp,
+            i_forged,
+            z_0,
+            z_i_forged.clone(),
+            &U_i1_forged.get_commitments(),
+            &u_i_forged.get_commitments(),
+            &forged_proof,
+        );
+
+        assert!(
+            matches!(result, Err(Error::SNARKVerificationFail)),
+            "verifier must reject a fabricated IVC state {z_i_forged:?}, got {result:?}"
         );
 
         Ok(())

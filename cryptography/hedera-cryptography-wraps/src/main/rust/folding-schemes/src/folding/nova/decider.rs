@@ -265,7 +265,8 @@ where
         i: C1::ScalarField,
         z_0: Vec<C1::ScalarField>,
         z_i: Vec<C1::ScalarField>,
-        // we don't use the instances at the verifier level, since we check them in-circuit
+        // the commitments of these instances are public inputs to the SNARK, where they are
+        // enforced equal to the instances the circuit folded
         running_commitments: &Self::CommittedInstance,
         incoming_commitments: &Self::CommittedInstance,
         proof: &Self::Proof,
@@ -290,6 +291,8 @@ where
             &[vp.pp_hash, i][..],
             &z_0,
             &z_i,
+            &running_commitments.inputize_nonnative(),
+            &incoming_commitments.inputize_nonnative(),
             &U_final_commitments.inputize_nonnative(),
             &cf_U.inputize_nonnative(),
             &proof.cs1_challenges,

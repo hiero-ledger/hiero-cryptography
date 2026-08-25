@@ -180,7 +180,7 @@ impl<
         C1: Curve,
         C2: Curve<ScalarField = CF2<C1>, BaseField = CF1<C1>>,
         RU: CommittedInstanceOps<CF1<C1>, C = C1>,
-        IU: CommittedInstanceOps<CF1<C1>>,
+        IU: CommittedInstanceOps<CF1<C1>, C = C1>,
         W: WitnessOps<CF1<C1>>,
         A: ArithRelation<W, RU>,
         AVar: ArithRelationGadget<W::Var, RU::Var> + AllocVar<A, CF1<C1>>,
@@ -188,6 +188,7 @@ impl<
     > ConstraintSynthesizer<CF1<C1>> for GenericOnchainDeciderCircuit<C1, C2, RU, IU, W, A, AVar, D>
 where
     RU::Var: AbsorbGadget<CF1<C1>> + CommittedInstanceVarOps<CF1<C1>, PointVar = NonNativeAffineVar<C1>>,
+    IU::Var: CommittedInstanceVarOps<CF1<C1>, PointVar = NonNativeAffineVar<C1>>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<CF1<C1>>) -> Result<(), SynthesisError> {
         let arith = AVar::new_witness(cs.clone(), || Ok(&self.arith))?;
@@ -197,8 +198,21 @@ where
         let z_0 = Vec::new_input(cs.clone(), || Ok(self.z_0))?;
         let z_i = Vec::new_input(cs.clone(), || Ok(self.z_i))?;
 
+        // `U_i` and `u_i` are witnesses, but the verifier folds *its own* copies of their
+        // commitments natively. Expose them as public inputs and pin them to the witnesses, so the
+        // instances the verifier folds are the same ones the circuit reasons about. Without this,
+        // binding the fold randomness alone is not enough: a prover can pick witness instances to
+        // fix `r` and then supply unrelated commitments on the wire.
+        let U_i_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
+            Ok(self.U_i.get_commitments())
+        })?;
+        let u_i_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
+            Ok(self.u_i.get_commitments())
+        })?;
         let u_i = IU::Var::new_witness(cs.clone(), || Ok(self.u_i))?;
         let U_i = RU::Var::new_witness(cs.clone(), || Ok(self.U_i))?;
+        U_i.get_commitments().enforce_equal(&U_i_commitments)?;
+        u_i.get_commitments().enforce_equal(&u_i_commitments)?;
         // here (U_i1, W_i1) = NIFS.P( (U_i,W_i), (u_i,w_i))
         let U_i1_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
             Ok(self.U_i1.get_commitments())

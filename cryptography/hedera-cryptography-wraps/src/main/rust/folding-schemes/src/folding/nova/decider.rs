@@ -265,7 +265,8 @@ where
         i: C1::ScalarField,
         z_0: Vec<C1::ScalarField>,
         z_i: Vec<C1::ScalarField>,
-        // we don't use the instances at the verifier level, since we check them in-circuit
+        // the commitments of these instances are public inputs to the SNARK, where they are
+        // enforced equal to the instances the circuit folded
         running_commitments: &Self::CommittedInstance,
         incoming_commitments: &Self::CommittedInstance,
         proof: &Self::Proof,
@@ -284,15 +285,20 @@ where
         let cf_U = proof.cf_U_final.clone();
 
         // snark proof 1
+        // NOTE: the order here must match the order in which `GenericOffchainDeciderCircuit1`
+        // allocates its public inputs.
         let c1_public_input = [
             &[vp.pp_hash, i][..],
             &z_0,
             &z_i,
+            &running_commitments.inputize_nonnative(),
+            &incoming_commitments.inputize_nonnative(),
             &U_final_commitments.inputize_nonnative(),
             &cf_U.inputize_nonnative(),
             &proof.cs1_challenges,
             &proof.cs1_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
             &proof.cmT.inputize_nonnative(),
+            &[proof.r][..],
         ]
         .concat();
 

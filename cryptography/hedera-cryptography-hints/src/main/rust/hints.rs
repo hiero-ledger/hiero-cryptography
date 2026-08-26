@@ -129,14 +129,10 @@ pub struct ThresholdSignature {
     /// commitment to the ParSum polynomial ([ParSum(τ)]_1 in the paper)
     parsum_of_tau_com: G1AffinePoint,
 
-    /// commitment to the ParSum well-formedness quotient polynomial
-    q1_of_tau_com: G1AffinePoint,
-    /// commitment to the ParSum check at omega^{n-1} quotient polynomial
-    q3_of_tau_com: G1AffinePoint,
-    /// commitment to the bitmap well-formedness quotient polynomial
-    q2_of_tau_com: G1AffinePoint,
-    /// commitment to the bitmap check at omega^{n-1} quotient polynomial
-    q4_of_tau_com: G1AffinePoint,
+    /// commitment to the merged quotient polynomial ([Q_mrg(τ)]_1 in the paper),
+    /// Q_mrg(x) = Q1(x) + χ_Q · Q2(x) + χ_Q^2 · Q3(x) + χ_Q^3 · Q4(x), where Q1..Q4
+    /// are the quotients of the four Plonkish identities checked by `verify`
+    q_mrg_of_tau_com: G1AffinePoint,
 
     /// merged opening proof for all openings at x = r
     opening_proof_r: G1AffinePoint,
@@ -151,14 +147,8 @@ pub struct ThresholdSignature {
     w_of_r: F,
     /// polynomial evaluation of bitmap B(x) at x = r
     b_of_r: F,
-    /// polynomial evaluation of quotient Q1(x) at x = r
-    q1_of_r: F,
-    /// polynomial evaluation of quotient Q3(x) at x = r
-    q3_of_r: F,
-    /// polynomial evaluation of quotient Q2(x) at x = r
-    q2_of_r: F,
-    /// polynomial evaluation of quotient Q4(x) at x = r
-    q4_of_r: F,
+    /// polynomial evaluation of the merged quotient Q_mrg(x) at x = r
+    q_mrg_of_r: F,
 }
 
 #[derive(Clone, Debug, PartialEq, CanonicalDeserialize, CanonicalSerialize)]
@@ -713,23 +703,6 @@ impl HinTS {
         let psw_of_x = compute_psw_poly(&weights, &bitmap)?;
         let psw_of_x_div_ω = utils::poly_domain_mult_ω(&psw_of_x, &ω_inv);
 
-        //ParSumW(X) = ParSumW(X/ω) + W(X) · b(X) + Z(X) · Q1(X)
-        let t_of_x = psw_of_x.sub(&psw_of_x_div_ω).sub(&w_of_x.mul(&b_of_x));
-        let psw_wff_q_of_x = t_of_x.div(&z_of_x);
-
-        //L_{n−1}(X) · ParSumW(X) = Z(X) · Q2(X)
-        let t_of_x = l_n_minus_1_of_x.mul(&psw_of_x);
-        let psw_check_q_of_x = t_of_x.div(&z_of_x);
-
-        //b(X) · b(X) − b(X) = Z(X) · Q3(X)
-        let t_of_x = b_of_x.mul(&b_of_x).sub(&b_of_x);
-        let b_wff_q_of_x = t_of_x.div(&z_of_x);
-
-        //L_{n−1}(X) · (b(X) - 1) = Z(X) · Q4(X)
-        let one_poly = utils::compute_constant_poly(&F::from(1));
-        let t_of_x = l_n_minus_1_of_x.mul(&b_of_x.sub(&one_poly));
-        let b_check_q_of_x = t_of_x.div(&z_of_x);
-
         let qz_com = inner_product(&ak.qz_terms, &bitmap);
         let qx_com = inner_product(&ak.qx_terms, &bitmap);
         let qx_mul_tau_com = inner_product(&ak.qx_mul_tau_terms, &bitmap);
@@ -748,13 +721,10 @@ impl HinTS {
         let parsum_of_tau_com = KZG::commit_g1(&crs, &psw_of_x)?;
         let w_of_tau_com = KZG::commit_g1(&crs, &w_of_x)?;
         let b_of_tau_com = KZG::commit_g1(&crs, &b_of_x)?;
-        let q1_of_tau_com = KZG::commit_g1(&crs, &psw_wff_q_of_x)?;
-        let q2_of_tau_com = KZG::commit_g1(&crs, &b_wff_q_of_x)?;
-        let q3_of_tau_com = KZG::commit_g1(&crs, &psw_check_q_of_x)?;
-        let q4_of_tau_com = KZG::commit_g1(&crs, &b_check_q_of_x)?;
 
-        // RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
-        let r = random_oracle(
+        // Transcript(SK, τ, aPK, w, W, B, ParSum, Qx, Qz, Qx(τ) · τ): everything the
+        // prover is bound to before the quotients get merged
+        let transcript = fiat_shamir_transcript(
             vk.sk_of_tau_com,
             vk.h_1,
             agg_pk,
@@ -765,39 +735,56 @@ impl HinTS {
             qx_com,
             qz_com,
             qx_mul_tau_com,
-            q1_of_tau_com,
-            q2_of_tau_com,
-            q3_of_tau_com,
-            q4_of_tau_com,
         )?;
+
+        // χ_Q merges the four Plonkish identities into one. It has to be drawn before the
+        // merged quotient is committed to, and the evaluation point r only after that.
+        let χ_q = quotient_merge_random_oracle(&transcript)?;
+
+        // the four identities, each of the form P_i(X) = Z(X) · Q_i(X):
+        //   P1: ParSumW(X) − ParSumW(X/ω) − W(X) · b(X)
+        //   P2: b(X) · b(X) − b(X)
+        //   P3: L_{n−1}(X) · ParSumW(X)
+        //   P4: L_{n−1}(X) · (b(X) − 1)
+        // Every P_i vanishes on the subgroup, so merging the numerators and dividing once
+        // gives the same Q_mrg as dividing each P_i and then merging the quotients -- at
+        // the cost of a single polynomial division instead of four.
+        let one_poly = utils::compute_constant_poly(&F::from(1));
+        let p1_of_x = psw_of_x.sub(&psw_of_x_div_ω).sub(&w_of_x.mul(&b_of_x));
+        let p2_of_x = b_of_x.mul(&b_of_x).sub(&b_of_x);
+        let p3_of_x = l_n_minus_1_of_x.mul(&psw_of_x);
+        let p4_of_x = l_n_minus_1_of_x.mul(&b_of_x.sub(&one_poly));
+
+        let p_mrg_of_x = merge_polys_with_powers([&p1_of_x, &p2_of_x, &p3_of_x, &p4_of_x], &χ_q);
+        let q_mrg_of_x = p_mrg_of_x.div(&z_of_x);
+        let q_mrg_of_tau_com = KZG::commit_g1(&crs, &q_mrg_of_x)?;
+
+        // RO(Transcript, Q_mrg): the evaluation point binds the merged quotient as well
+        let r = evaluation_point_random_oracle(&transcript, &q_mrg_of_tau_com)?;
         let r_div_ω: F = r / ω;
+
+        let psw_of_r = psw_of_x.evaluate(&r);
+        let w_of_r = w_of_x.evaluate(&r);
+        let b_of_r = b_of_x.evaluate(&r);
+        let q_mrg_of_r = q_mrg_of_x.evaluate(&r);
 
         let psw_of_r_proof = KZG::compute_opening_proof(&crs, &psw_of_x, &r)?;
         let w_of_r_proof = KZG::compute_opening_proof(&crs, &w_of_x, &r)?;
         let b_of_r_proof = KZG::compute_opening_proof(&crs, &b_of_x, &r)?;
-        let psw_wff_q_of_r_proof = KZG::compute_opening_proof(&crs, &psw_wff_q_of_x, &r)?;
-        let psw_check_q_of_r_proof = KZG::compute_opening_proof(&crs, &psw_check_q_of_x, &r)?;
-        let b_wff_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_wff_q_of_x, &r)?;
-        let b_check_q_of_r_proof = KZG::compute_opening_proof(&crs, &b_check_q_of_x, &r)?;
+        let q_mrg_of_r_proof = KZG::compute_opening_proof(&crs, &q_mrg_of_x, &r)?;
 
         let s = kzg_batch_argument_random_oracle(
             &[
                 &parsum_of_tau_com,
                 &w_of_tau_com,
                 &b_of_tau_com,
-                &q1_of_tau_com,
-                &q3_of_tau_com,
-                &q2_of_tau_com,
-                &q4_of_tau_com
+                &q_mrg_of_tau_com
             ],
             &[
-                &psw_of_x.evaluate(&r),
-                &w_of_x.evaluate(&r),
-                &b_of_x.evaluate(&r),
-                &psw_wff_q_of_x.evaluate(&r),
-                &psw_check_q_of_x.evaluate(&r),
-                &b_wff_q_of_x.evaluate(&r),
-                &b_check_q_of_x.evaluate(&r)
+                &psw_of_r,
+                &w_of_r,
+                &b_of_r,
+                &q_mrg_of_r
             ],
         )?;
 
@@ -805,10 +792,7 @@ impl HinTS {
         let merged_proof: G1AffinePoint = (psw_of_r_proof
             + w_of_r_proof.mul(s.pow([1]))
             + b_of_r_proof.mul(s.pow([2]))
-            + psw_wff_q_of_r_proof.mul(s.pow([3]))
-            + psw_check_q_of_r_proof.mul(s.pow([4]))
-            + b_wff_q_of_r_proof.mul(s.pow([5]))
-            + b_check_q_of_r_proof.mul(s.pow([6])))
+            + q_mrg_of_r_proof.mul(s.pow([3])))
         .into();
 
         Ok(ThresholdSignature {
@@ -819,22 +803,16 @@ impl HinTS {
             parsum_of_r_div_ω: psw_of_x.evaluate(&r_div_ω),
             opening_proof_r_div_ω: KZG::compute_opening_proof(&crs, &psw_of_x, &r_div_ω)?,
 
-            parsum_of_r: psw_of_x.evaluate(&r),
-            w_of_r: w_of_x.evaluate(&r),
-            b_of_r: b_of_x.evaluate(&r),
-            q1_of_r: psw_wff_q_of_x.evaluate(&r),
-            q3_of_r: psw_check_q_of_x.evaluate(&r),
-            q2_of_r: b_wff_q_of_x.evaluate(&r),
-            q4_of_r: b_check_q_of_x.evaluate(&r),
+            parsum_of_r: psw_of_r,
+            w_of_r: w_of_r,
+            b_of_r: b_of_r,
+            q_mrg_of_r: q_mrg_of_r,
 
             opening_proof_r: merged_proof.into(),
 
             parsum_of_tau_com: parsum_of_tau_com,
             b_of_tau_com: b_of_tau_com,
-            q1_of_tau_com: q1_of_tau_com,
-            q3_of_tau_com: q3_of_tau_com,
-            q2_of_tau_com: q2_of_tau_com,
-            q4_of_tau_com: q4_of_tau_com,
+            q_mrg_of_tau_com: q_mrg_of_tau_com,
 
             qz_of_tau_com: qz_com,
             qx_of_tau_com: qx_com,
@@ -874,8 +852,11 @@ impl HinTS {
             )
         )?;
 
-        //RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
-        let r = random_oracle(
+        //Transcript(SK, τ, aPK, w, W, B, ParSum, Qx, Qz, Qx(τ) · τ), then the two
+        //challenges derived from it: χ_Q is bound to the transcript alone, while the
+        //evaluation point r additionally binds the merged quotient commitment, so the
+        //prover cannot pick Q_mrg after learning r.
+        let transcript = fiat_shamir_transcript(
             vk.sk_of_tau_com,
             vk.h_1,
             π.agg_pk,
@@ -886,11 +867,9 @@ impl HinTS {
             π.qx_of_tau_com,
             π.qz_of_tau_com,
             π.qx_of_tau_mul_tau_com,
-            π.q1_of_tau_com,
-            π.q2_of_tau_com,
-            π.q3_of_tau_com,
-            π.q4_of_tau_com,
         )?;
+        let χ_q = quotient_merge_random_oracle(&transcript)?;
+        let r = evaluation_point_random_oracle(&transcript, &π.q_mrg_of_tau_com)?;
 
         // verify the polynomial openings at r and r / ω
         check_or_return_false!(verify_openings_in_proof(vk, π, r)?);
@@ -914,26 +893,27 @@ impl HinTS {
 
         //assert checks on the public part
 
-        //ParSumW(r) − ParSumW(r/ω) − W(r) · b(r) = Q(r) · (r^n − 1)
-        let lhs = π.parsum_of_r - π.parsum_of_r_div_ω - π.w_of_r * π.b_of_r;
-        let rhs = π.q1_of_r * vanishing_of_r;
-        check_or_return_false!(lhs == rhs);
-
-        //Ln−1(X) · ParSumW(X) = Z(X) · Q2(X)
-        //TODO: compute l_n_minus_1_of_r in verifier -- dont put it in the proof.
-        let lhs = l_n_minus_1_of_r * π.parsum_of_r;
-        let rhs = vanishing_of_r * π.q3_of_r;
-        check_or_return_false!(lhs == rhs);
-
-        //b(r) * b(r) - b(r) = Q(r) · (r^n − 1)
-        let lhs = π.b_of_r * π.b_of_r - π.b_of_r;
-        let rhs = π.q2_of_r * vanishing_of_r;
-        check_or_return_false!(lhs == rhs);
-
-        //Ln−1(X) · (b(X) − 1) = Z(X) · Q4(X)
-        let lhs = l_n_minus_1_of_r * (π.b_of_r - F::from(1));
-        let rhs = vanishing_of_r * π.q4_of_r;
-        check_or_return_false!(lhs == rhs);
+        //the four Plonkish identities, each of which must equal Z(r) times its own
+        //quotient at the random point r:
+        //  P1(r): ParSumW(r) − ParSumW(r/ω) − W(r) · b(r)
+        //  P2(r): b(r) · b(r) − b(r)
+        //  P3(r): L_{n−1}(r) · ParSumW(r)
+        //  P4(r): L_{n−1}(r) · (b(r) − 1)
+        //are merged with the coefficient χ_Q into the single identity
+        //  P1(r) + χ_Q · P2(r) + χ_Q^2 · P3(r) + χ_Q^3 · P4(r) = Z(r) · Q_mrg(r).
+        //If any individual identity fails as a polynomial identity, the merged one fails
+        //too, except with probability 1/|F| over χ_Q (plus the usual Schwartz-Zippel
+        //error over r).
+        let p_mrg_of_r = merge_evaluations_with_powers(
+            [
+                π.parsum_of_r - π.parsum_of_r_div_ω - π.w_of_r * π.b_of_r,
+                π.b_of_r * π.b_of_r - π.b_of_r,
+                l_n_minus_1_of_r * π.parsum_of_r,
+                l_n_minus_1_of_r * (π.b_of_r - F::from(1)),
+            ],
+            &χ_q,
+        );
+        check_or_return_false!(p_mrg_of_r == π.q_mrg_of_r * vanishing_of_r);
 
         //run the degree check e([Qx(τ)]_1, [τ]_2) ?= e([Qx(τ)·τ]_1, [1]_2)
         let lhs = x2;
@@ -1018,8 +998,12 @@ fn kzg_batch_argument_random_oracle(
     Ok(hasher.hash_to_field(&serialized_data, 1)[0])
 }
 
-/// computes a hash for the Fiat-Shamir heuristic
-fn random_oracle(
+/// serializes the first round of the Fiat-Shamir transcript: the aggregate values and
+/// every commitment the prover is bound to before the merged quotient exists. Both
+/// challenges derived from the aggregate proof start from this prefix, computed by the
+/// exact same call on the prover and the verifier side, so the two cannot diverge.
+/// All absorbed elements are fixed-width, so the concatenation is unambiguous.
+fn fiat_shamir_transcript(
     sk_com: G2AffinePoint,
     tau_com: G2AffinePoint,
     agg_pk: G1AffinePoint,
@@ -1030,11 +1014,7 @@ fn random_oracle(
     qx_com: G1AffinePoint,
     qz_com: G1AffinePoint,
     qx_mul_x_com: G1AffinePoint,
-    q1_com: G1AffinePoint,
-    q2_com: G1AffinePoint,
-    q3_com: G1AffinePoint,
-    q4_com: G1AffinePoint,
-) -> Result<F, HinTSError> {
+) -> Result<Vec<u8>, HinTSError> {
     let mut serialized_data = Vec::new();
     sk_com.serialize_compressed(&mut serialized_data)?;
     tau_com.serialize_compressed(&mut serialized_data)?;
@@ -1046,16 +1026,61 @@ fn random_oracle(
     qx_com.serialize_compressed(&mut serialized_data)?;
     qz_com.serialize_compressed(&mut serialized_data)?;
     qx_mul_x_com.serialize_compressed(&mut serialized_data)?;
-    q1_com.serialize_compressed(&mut serialized_data)?;
-    q2_com.serialize_compressed(&mut serialized_data)?;
-    q3_com.serialize_compressed(&mut serialized_data)?;
-    q4_com.serialize_compressed(&mut serialized_data)?;
 
-    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR_HINTS";
+    Ok(serialized_data)
+}
+
+/// Fiat-Shamir transform to derive χ_Q, the coefficient that merges the four Plonkish
+/// quotient identities into one. It is derived from the first-round transcript alone: the
+/// prover only learns χ_Q once it is committed to B, ParSum, Qx, Qz and Qx(τ)·τ, and it
+/// must then commit to the merged quotient before learning the evaluation point.
+fn quotient_merge_random_oracle(
+    transcript: &[u8]
+) -> Result<F, HinTSError> {
+    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR_QUOTIENT_MERGE";
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST.as_bytes());
-    let field_elements = hasher.hash_to_field(&serialized_data, 1);
+    Ok(hasher.hash_to_field(transcript, 1)[0])
+}
 
-    Ok(field_elements[0])
+/// Fiat-Shamir transform to derive the evaluation point r. It binds the first-round
+/// transcript plus the merged quotient commitment; binding the latter is what stops the
+/// prover from choosing a Q_mrg that happens to interpolate the required value at an
+/// already-known r. The domain separator differs from the pre-merge scheme's so that a
+/// challenge can never be shared across the two proof layouts.
+fn evaluation_point_random_oracle(
+    transcript: &[u8],
+    q_mrg_com: &G1AffinePoint,
+) -> Result<F, HinTSError> {
+    const DST: &str = "HINTS_SIG_BLS12381:FIAT_SHAMIR_HINTS_MERGED_QUOTIENT";
+    let mut serialized_data = transcript.to_vec();
+    q_mrg_com.serialize_compressed(&mut serialized_data)?;
+
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST.as_bytes());
+    Ok(hasher.hash_to_field(&serialized_data, 1)[0])
+}
+
+/// merges four polynomials into p_1(x) + χ·p_2(x) + χ^2·p_3(x) + χ^3·p_4(x),
+/// evaluated with Horner's rule
+fn merge_polys_with_powers(
+    polys: [&DensePolynomial<F>; 4],
+    χ: &F,
+) -> DensePolynomial<F> {
+    let mut merged = polys[3].clone();
+    for poly in polys[..3].iter().rev() {
+        let scaled = utils::poly_eval_mult_c(&merged, χ);
+        merged = &scaled + *poly;
+    }
+    merged
+}
+
+/// merges four field elements into a_1 + χ·a_2 + χ^2·a_3 + χ^3·a_4, using Horner's rule;
+/// this is the evaluation at a point of the polynomial produced by
+/// `merge_polys_with_powers` over the same coefficient
+fn merge_evaluations_with_powers(
+    evaluations: [F; 4],
+    χ: &F,
+) -> F {
+    evaluations.iter().rev().fold(F::from(0), |acc, eval| acc * χ + eval)
 }
 
 fn verify_opening(
@@ -1087,39 +1112,27 @@ fn verify_openings_in_proof(
     let psw_of_r_argument = π.parsum_of_tau_com - vk.g_0.mul(π.parsum_of_r).into_affine();
     let w_of_r_argument = w_of_x_com - vk.g_0.mul(π.w_of_r).into_affine();
     let b_of_r_argument = π.b_of_tau_com - vk.g_0.mul(π.b_of_r).into_affine();
-    let psw_wff_q_of_r_argument = π.q1_of_tau_com - vk.g_0.mul(π.q1_of_r).into_affine();
-    let psw_check_q_of_r_argument = π.q3_of_tau_com - vk.g_0.mul(π.q3_of_r).into_affine();
-    let b_wff_q_of_r_argument = π.q2_of_tau_com - vk.g_0.mul(π.q2_of_r).into_affine();
-    let b_check_q_of_r_argument = π.q4_of_tau_com - vk.g_0.mul(π.q4_of_r).into_affine();
+    let q_mrg_of_r_argument = π.q_mrg_of_tau_com - vk.g_0.mul(π.q_mrg_of_r).into_affine();
 
     let s = kzg_batch_argument_random_oracle(
         &[
             &π.parsum_of_tau_com,
             &w_of_x_com,
             &π.b_of_tau_com,
-            &π.q1_of_tau_com,
-            &π.q3_of_tau_com,
-            &π.q2_of_tau_com,
-            &π.q4_of_tau_com
+            &π.q_mrg_of_tau_com
         ],
         &[
             &π.parsum_of_r,
             &π.w_of_r,
             &π.b_of_r,
-            &π.q1_of_r,
-            &π.q3_of_r,
-            &π.q2_of_r,
-            &π.q4_of_r
+            &π.q_mrg_of_r
         ],
     )?;
 
     let merged_argument: G1AffinePoint = (psw_of_r_argument
         + w_of_r_argument.mul(s.pow([1]))
         + b_of_r_argument.mul(s.pow([2]))
-        + psw_wff_q_of_r_argument.mul(s.pow([3]))
-        + psw_check_q_of_r_argument.mul(s.pow([4]))
-        + b_wff_q_of_r_argument.mul(s.pow([5]))
-        + b_check_q_of_r_argument.mul(s.pow([6])))
+        + q_mrg_of_r_argument.mul(s.pow([3])))
     .into_affine();
 
     let lhs = <Curve as Pairing>::pairing(merged_argument, vk.h_0);
@@ -1282,6 +1295,19 @@ mod tests {
         assert_eq!(epks[0], deserialized_epk);
         assert_eq!(crs, deserialized_crs);
 
+        // The aggregate signature is a fixed-size object, independent of n: 9 G1 points
+        // (aPK, B, Qx, Qx·τ, Qz, ParSum, Q_mrg, and the two opening proofs), 1 G2 point
+        // (the aggregate signature) and 6 field elements (the aggregate weight plus
+        // ParSum(r), ParSum(r/ω), W(r), B(r), Q_mrg(r)). Changing this is a wire-format
+        // change for every consumer, so it has to be done deliberately.
+        const G1_UNCOMPRESSED: usize = 96;
+        const G2_UNCOMPRESSED: usize = 192;
+        const F_BYTES: usize = 32;
+        assert_eq!(
+            serialized_π.len(),
+            9 * G1_UNCOMPRESSED + G2_UNCOMPRESSED + 6 * F_BYTES
+        );
+
         // print out sizes for our information
         println!("vk size: {}", serialized_vk.len());
         println!("ak size: {}", serialized_ak.len());
@@ -1326,6 +1352,197 @@ mod tests {
 
         // try a really high threshold of 99%
         assert!(!HinTS::verify(msg, &vk, &π_attack, (F::from(99), F::from(100))).unwrap());
+    }
+
+    /// Full participation is the degenerate case for two of the four merged identities:
+    /// with every bit set, b(x) ≡ 1, so both b(x)·b(x) − b(x) and L_{n−1}(x)·(b(x) − 1)
+    /// are the zero polynomial and contribute nothing to the merged quotient. The proof
+    /// must still be produced and accepted.
+    #[test]
+    fn test_aggregate_with_full_participation() {
+        let universe_n = 32;
+        let msg = b"everybody signs";
+
+        let (crs, ak, vk, sks, _) = sample_universe(universe_n);
+        let sigs: HashMap<usize, PartialSignature> = (0..universe_n - 1)
+            .map(|i| (i, HinTS::sign(msg, &sks[i]).unwrap()))
+            .collect();
+
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sigs).unwrap();
+        assert!(HinTS::verify(msg, &vk, &π, (F::from(1), F::from(3))).unwrap());
+
+        // the entire roster signed, so even a 99% threshold is met
+        assert!(HinTS::verify(msg, &vk, &π, (F::from(99), F::from(100))).unwrap());
+    }
+
+    /// Every proof element that the merged-quotient identity or the batched openings bind
+    /// must be load-bearing: perturbing any single one of them has to make verification
+    /// fail. This is the regression net for the quotient-merging optimization, which
+    /// replaced four separate quotient checks with one linear combination.
+    #[test]
+    fn test_verify_rejects_tampered_proof() {
+        let universe_n = 32;
+        let msg = b"tampering";
+        let threshold = (F::from(1), F::from(3));
+
+        let (crs, ak, vk, sks, _) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sigs).unwrap();
+        assert!(HinTS::verify(msg, &vk, &π, threshold).unwrap());
+
+        let one = F::from(1);
+        // a G1 point that is guaranteed to differ from any commitment in the proof
+        let displace = |point: G1AffinePoint| (point + π.b_of_tau_com).into_affine();
+
+        let tampered = vec![
+            ("q_mrg_of_r", ThresholdSignature { q_mrg_of_r: π.q_mrg_of_r + one, ..π.clone() }),
+            ("parsum_of_r", ThresholdSignature { parsum_of_r: π.parsum_of_r + one, ..π.clone() }),
+            (
+                "parsum_of_r_div_ω",
+                ThresholdSignature { parsum_of_r_div_ω: π.parsum_of_r_div_ω + one, ..π.clone() },
+            ),
+            ("w_of_r", ThresholdSignature { w_of_r: π.w_of_r + one, ..π.clone() }),
+            ("b_of_r", ThresholdSignature { b_of_r: π.b_of_r + one, ..π.clone() }),
+            (
+                "q_mrg_of_tau_com",
+                ThresholdSignature {
+                    q_mrg_of_tau_com: displace(π.q_mrg_of_tau_com),
+                    ..π.clone()
+                },
+            ),
+            (
+                "parsum_of_tau_com",
+                ThresholdSignature {
+                    parsum_of_tau_com: displace(π.parsum_of_tau_com),
+                    ..π.clone()
+                },
+            ),
+            (
+                "opening_proof_r",
+                ThresholdSignature { opening_proof_r: displace(π.opening_proof_r), ..π.clone() },
+            ),
+            (
+                "opening_proof_r_div_ω",
+                ThresholdSignature {
+                    opening_proof_r_div_ω: displace(π.opening_proof_r_div_ω),
+                    ..π.clone()
+                },
+            ),
+        ];
+
+        for (field, bad_π) in tampered {
+            assert!(
+                !HinTS::verify(msg, &vk, &bad_π, threshold).unwrap(),
+                "verify accepted a proof with a tampered {}",
+                field
+            );
+        }
+    }
+
+    /// The merged quotient is bound to the transcript it was committed under: splicing a
+    /// valid (commitment, evaluation) pair out of a proof over a different participating set
+    /// must be rejected, even though that pair is perfectly valid in its own proof.
+    #[test]
+    fn test_verify_rejects_spliced_merged_quotient() {
+        let universe_n = 32;
+        let msg = b"splicing";
+        let threshold = (F::from(1), F::from(3));
+
+        let (crs, ak, vk, sks, _) = sample_universe(universe_n);
+        let sign_all = |indices: Vec<usize>| -> HashMap<usize, PartialSignature> {
+            indices.into_iter().map(|i| (i, HinTS::sign(msg, &sks[i]).unwrap())).collect()
+        };
+
+        // two different participating sets, hence two different transcripts
+        let even = (0..universe_n - 1).step_by(2).collect::<Vec<usize>>();
+        let not_thirds = (0..universe_n - 1).filter(|i| i % 3 != 0).collect::<Vec<usize>>();
+        let π_a = HinTS::aggregate(&crs, &ak, &vk, &sign_all(even)).unwrap();
+        let π_b = HinTS::aggregate(&crs, &ak, &vk, &sign_all(not_thirds)).unwrap();
+
+        assert!(HinTS::verify(msg, &vk, &π_a, threshold).unwrap());
+        assert!(HinTS::verify(msg, &vk, &π_b, threshold).unwrap());
+        assert_ne!(π_a.q_mrg_of_tau_com, π_b.q_mrg_of_tau_com);
+
+        let spliced = ThresholdSignature {
+            q_mrg_of_tau_com: π_b.q_mrg_of_tau_com,
+            q_mrg_of_r: π_b.q_mrg_of_r,
+            ..π_a.clone()
+        };
+        assert!(!HinTS::verify(msg, &vk, &spliced, threshold).unwrap());
+
+        // and a proof does not carry over to another message
+        assert!(!HinTS::verify(b"another message", &vk, &π_a, threshold).unwrap());
+    }
+
+    /// White-box check on the quotient merge: the merged identity must hold for an honest
+    /// proof, all four of the identities it folds together must still be enforced, and the
+    /// evaluation point must be bound to the merged quotient commitment (otherwise a
+    /// prover could choose Q_mrg after learning where it will be evaluated).
+    #[test]
+    fn test_merged_quotient_binds_all_four_identities() {
+        let universe_n = 32;
+        let msg = b"merged quotient";
+        let threshold = (F::from(1), F::from(3));
+
+        let (crs, ak, vk, sks, _) = sample_universe(universe_n);
+        let sigs = sample_signing(universe_n - 1, msg, &sks);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sigs).unwrap();
+        assert!(HinTS::verify(msg, &vk, &π, threshold).unwrap());
+
+        // recompute both challenges exactly the way `verify` does
+        let transcript = fiat_shamir_transcript(
+            vk.sk_of_tau_com,
+            vk.h_1,
+            π.agg_pk,
+            π.agg_weight,
+            vk.w_of_tau_com,
+            π.b_of_tau_com,
+            π.parsum_of_tau_com,
+            π.qx_of_tau_com,
+            π.qz_of_tau_com,
+            π.qx_of_tau_mul_tau_com,
+        )
+        .unwrap();
+        let χ_q = quotient_merge_random_oracle(&transcript).unwrap();
+        let r = evaluation_point_random_oracle(&transcript, &π.q_mrg_of_tau_com).unwrap();
+
+        // the two challenges are independent draws over the same transcript prefix
+        assert_ne!(χ_q, r);
+        assert_ne!(χ_q, F::from(0));
+
+        // r moves when the merged quotient commitment moves
+        let other_com = (π.q_mrg_of_tau_com + π.b_of_tau_com).into_affine();
+        assert_ne!(r, evaluation_point_random_oracle(&transcript, &other_com).unwrap());
+
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let vanishing_of_r: F = r.pow([vk.n as u64]) - F::from(1);
+        let ω_pow_n_minus_1 = ω.pow([(vk.n as u64) - 1]);
+        let l_n_minus_1_of_r =
+            (ω_pow_n_minus_1 / F::from(vk.n as u64)) * (vanishing_of_r / (r - ω_pow_n_minus_1));
+
+        let residuals = [
+            π.parsum_of_r - π.parsum_of_r_div_ω - π.w_of_r * π.b_of_r,
+            π.b_of_r * π.b_of_r - π.b_of_r,
+            l_n_minus_1_of_r * π.parsum_of_r,
+            l_n_minus_1_of_r * (π.b_of_r - F::from(1)),
+        ];
+        let expected = π.q_mrg_of_r * vanishing_of_r;
+
+        // the honest proof satisfies the merged identity
+        assert_eq!(merge_evaluations_with_powers(residuals, &χ_q), expected);
+
+        // and no identity was dropped by the merge: each of the four slots changes the
+        // merged value, so each is still checked
+        for i in 0..residuals.len() {
+            let mut perturbed = residuals;
+            perturbed[i] += F::from(1);
+            assert_ne!(
+                merge_evaluations_with_powers(perturbed, &χ_q),
+                expected,
+                "identity {} is not bound by the merged quotient check",
+                i + 1
+            );
+        }
     }
 
     fn sample_signing(

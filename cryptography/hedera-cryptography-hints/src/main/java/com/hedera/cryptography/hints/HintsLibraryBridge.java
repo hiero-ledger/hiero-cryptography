@@ -21,7 +21,18 @@ public class HintsLibraryBridge {
     /** The minimum length of an aggregationKey = 48 prefix + at least 1 byte of data. */
     private static final int MIN_AGGREGATION_KEY_SIZE = 49;
 
-    private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 1632;
+    /**
+     * The length of a serialized aggregate signature. It is a fixed-size object, independent of the
+     * number of parties: 9 uncompressed G1 points (aggregate public key, B, Qx, Qx*tau, Qz, ParSum,
+     * the merged quotient, and the two KZG opening proofs) at 96 bytes each, 1 uncompressed G2 point
+     * (the aggregate signature) at 192 bytes, and 6 field elements (the aggregate weight plus the
+     * evaluations of ParSum(r), ParSum(r/omega), W(r), B(r) and Qmrg(r)) at 32 bytes each.
+     * <p>
+     * This changed from 1632 when the four Plonkish quotient relations were merged into one
+     * (whitepaper section 3.4.3), which removed 3 G1 points and 3 field elements from the proof.
+     */
+    private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 9 * 96 + 192 + 6 * 32; // 1248
+
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
     private static final int COMPRESSED_G1_LENGTH_BYTES = 48;
     private static final int COMPRESSED_G2_LENGTH_BYTES = 96;

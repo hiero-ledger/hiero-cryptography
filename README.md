@@ -8,6 +8,8 @@
 
 This section is a work in progress.
 
+The cryptographic protocol description is contained within [this file](./docs/whitepaper.pdf).
+
 The repository includes the following projects:
 * **cryptography/hedera-cryptography-hints**: HinTS API that allows participants to calculate their hints, generate keys, and produce and verify aggregate signatures.
 * **cryptography/hedera-cryptography-wraps**: WRAPS 2.0 library that allows participants to generate and verify recursive proofs for AddressBooks.

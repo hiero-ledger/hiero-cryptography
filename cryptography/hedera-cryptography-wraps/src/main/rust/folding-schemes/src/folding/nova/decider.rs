@@ -16,9 +16,10 @@ use super::decider_eth_circuit::DeciderNovaGadget;
 use super::Nova;
 use crate::commitment::CommitmentScheme;
 use crate::folding::circuits::cyclefold::CycleFoldCommittedInstance;
+use crate::folding::circuits::decider::off_chain::offchain_decider_circuit1_public_input;
 use crate::folding::circuits::decider::DeciderEnabledNIFS;
 use crate::folding::traits::{
-    CommittedInstanceOps, Dummy, Inputize, InputizeNonNative, WitnessOps,
+    CommittedInstanceOps, Dummy, Inputize, WitnessOps,
 };
 use crate::frontend::FCircuit;
 use crate::transcript::poseidon::poseidon_custom_config;
@@ -274,7 +275,11 @@ where
             return Err(Error::NotEnoughSteps);
         }
 
-        // 6.2. Fold the commitments
+        // 6.2. Fold the commitments.
+        // `running_commitments` and `incoming_commitments` are part of the
+        // statement (see `offchain_decider_circuit1_public_input`), and
+        // `proof.r` is bound in-circuit to the transcript challenge, so this
+        // equation is over the very same values circuit 1 folded in check 6.1.
         let U_final_commitments = DeciderNovaGadget::fold_group_elements_native(
             running_commitments,
             incoming_commitments,
@@ -284,17 +289,19 @@ where
         let cf_U = proof.cf_U_final.clone();
 
         // snark proof 1
-        let c1_public_input = [
-            &[vp.pp_hash, i][..],
+        let c1_public_input = offchain_decider_circuit1_public_input::<C1, C2>(
+            vp.pp_hash,
+            i,
             &z_0,
             &z_i,
-            &U_final_commitments.inputize_nonnative(),
-            &cf_U.inputize_nonnative(),
+            running_commitments,
+            incoming_commitments,
+            &U_final_commitments,
+            &cf_U,
             &proof.cs1_challenges,
             &proof.cs1_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
-            &proof.cmT.inputize_nonnative(),
-        ]
-        .concat();
+            &DeciderNovaGadget::inputize_proof_and_randomness(&proof.cmT, &proof.r),
+        );
 
         let c1_snark_v = S1::verify(&vp.c1_snark_vp, &c1_public_input, &proof.c1_snark_proof)
             .map_err(|e| Error::Other(e.to_string()))?;

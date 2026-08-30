@@ -132,6 +132,18 @@ pub trait DeciderEnabledNIFS<
         proof: Option<Self::Proof>,
         randomness: Self::Randomness,
     ) -> Result<Vec<C>, Error>;
+
+    /// Returns the public inputs that `fold_field_elements_gadget` allocates,
+    /// in the very same order it allocates them.
+    ///
+    /// `fold_group_elements_native` runs *outside* the circuit and consumes
+    /// `proof` and `randomness`, so both have to be part of the statement.
+    /// Otherwise the native fold would relate values that the prover picks
+    /// freely, and it would not be enforced at all.
+    fn inputize_proof_and_randomness(
+        proof: &Self::Proof,
+        randomness: &Self::Randomness,
+    ) -> Vec<CF1<C>>;
 }
 
 #[cfg(test)]

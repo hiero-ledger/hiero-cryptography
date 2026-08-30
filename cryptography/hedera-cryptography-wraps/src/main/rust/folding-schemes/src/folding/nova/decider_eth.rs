@@ -15,8 +15,9 @@ use core::marker::PhantomData;
 pub use super::decider_eth_circuit::DeciderEthCircuit;
 use super::decider_eth_circuit::DeciderNovaGadget;
 use super::Nova;
+use crate::folding::circuits::decider::on_chain::onchain_decider_public_input;
 use crate::folding::circuits::decider::DeciderEnabledNIFS;
-use crate::folding::traits::{InputizeNonNative, WitnessOps};
+use crate::folding::traits::WitnessOps;
 use crate::frontend::FCircuit;
 use crate::{
     commitment::{kzg::Proof as KZGProof, pedersen::Params as PedersenParams, CommitmentScheme},
@@ -227,7 +228,11 @@ where
             cs_vp,
         } = vp;
 
-        // 6.2. Fold the commitments
+        // 6.2. Fold the commitments.
+        // `running_commitments` and `incoming_commitments` are part of the
+        // statement (see `onchain_decider_public_input`), so this equation is
+        // over the very same instances the circuit folded in check 6.1, and
+        // `proof.r` is bound in-circuit to the transcript challenge.
         let U_final_commitments = DeciderNovaGadget::fold_group_elements_native(
             running_commitments,
             incoming_commitments,
@@ -235,16 +240,18 @@ where
             proof.r,
         )?;
 
-        let public_input = [
-            &[pp_hash, i][..],
+        let public_input = onchain_decider_public_input::<C1>(
+            pp_hash,
+            i,
             &z_0,
             &z_i,
-            &U_final_commitments.inputize_nonnative(),
+            running_commitments,
+            incoming_commitments,
+            &U_final_commitments,
             &proof.kzg_challenges,
             &proof.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
-            &proof.cmT.inputize_nonnative(),
-        ]
-        .concat();
+            &DeciderNovaGadget::inputize_proof_and_randomness(&proof.cmT, &proof.r),
+        );
 
         let snark_v = S::verify(&snark_vp, &public_input, &proof.snark_proof)
             .map_err(|e| Error::Other(e.to_string()))?;

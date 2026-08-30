@@ -1222,6 +1222,12 @@ impl WRAPS {
                 .ok_or_else(|| invalid_input("Previous proof is required for non-genesis steps"))?;
             let ivc_proof = NovaProof::deserialize_compressed(prev_proof.as_slice())
                 .map_err(|_| invalid_input("Failed to deserialize previous Nova proof"))?;
+            // The previous proof comes from a peer, and `from_ivc_proof` performs
+            // no checks of its own. Verify it before extending, so a bad proof is
+            // rejected here and attributed to its sender rather than surfacing
+            // later as an unexplained decider failure.
+            N::verify(vk.nova_vp.clone(), ivc_proof.clone())
+                .map_err(|_| invalid_input("Previous Nova proof failed verification"))?;
             N::from_ivc_proof(ivc_proof, (), (pk.nova_pp.clone(), vk.nova_vp.clone()))
                 .map_err(|_| WRAPSError::CryptographyError)?
         };

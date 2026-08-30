@@ -22,7 +22,10 @@ use crate::{
             nonnative::affine::NonNativeAffineVar,
             CF1, CF2,
         },
-        traits::{CommittedInstanceOps, CommittedInstanceVarOps, Dummy, WitnessOps, WitnessVarOps},
+        traits::{
+            CommittedInstanceOps, CommittedInstanceVarOps, Dummy, InputizeNonNative, WitnessOps,
+            WitnessVarOps,
+        },
     },
     transcript::TranscriptVar,
     utils::gadgets::check_same_lengths,
@@ -30,6 +33,47 @@ use crate::{
 };
 
 use super::DeciderEnabledNIFS;
+
+/// Builds the public input of [`GenericOnchainDeciderCircuit`], in the
+/// canonical order.
+///
+/// This is the single definition of the statement's layout: the verifier calls
+/// it, and `GenericOnchainDeciderCircuit::generate_constraints` allocates its
+/// public inputs in exactly this order. Keep the two in lockstep:
+/// `test_onchain_decider_public_input_layout` asserts they agree element by
+/// element, and the end-to-end decider tests exercise them through Groth16.
+///
+/// Note that `U_i`'s and `u_i`'s commitments are part of the statement: they
+/// are folded *outside* the circuit (check 6.2), so if they were witnesses the
+/// onchain fold would relate values the prover picks freely and would not be
+/// enforced at all.
+#[allow(clippy::too_many_arguments)]
+pub fn onchain_decider_public_input<C1: Curve>(
+    pp_hash: CF1<C1>,
+    i: CF1<C1>,
+    z_0: &[CF1<C1>],
+    z_i: &[CF1<C1>],
+    U_i_commitments: &[C1],
+    u_i_commitments: &[C1],
+    U_i1_commitments: &[C1],
+    kzg_challenges: &[CF1<C1>],
+    kzg_evaluations: &[CF1<C1>],
+    // the inputs allocated by `DeciderEnabledNIFS::fold_field_elements_gadget`
+    proof_and_randomness: &[CF1<C1>],
+) -> Vec<CF1<C1>> {
+    [
+        &[pp_hash, i][..],
+        z_0,
+        z_i,
+        &U_i_commitments.inputize_nonnative(),
+        &u_i_commitments.inputize_nonnative(),
+        &U_i1_commitments.inputize_nonnative(),
+        kzg_challenges,
+        kzg_evaluations,
+        proof_and_randomness,
+    ]
+    .concat()
+}
 
 /// A generic circuit tailored for the onchain (Ethereum's EVM) verification of
 /// IVC proofs, where we support IVC built upon any folding scheme.
@@ -180,7 +224,7 @@ impl<
         C1: Curve,
         C2: Curve<ScalarField = CF2<C1>, BaseField = CF1<C1>>,
         RU: CommittedInstanceOps<CF1<C1>, C = C1>,
-        IU: CommittedInstanceOps<CF1<C1>>,
+        IU: CommittedInstanceOps<CF1<C1>, C = C1>,
         W: WitnessOps<CF1<C1>>,
         A: ArithRelation<W, RU>,
         AVar: ArithRelationGadget<W::Var, RU::Var> + AllocVar<A, CF1<C1>>,
@@ -188,6 +232,7 @@ impl<
     > ConstraintSynthesizer<CF1<C1>> for GenericOnchainDeciderCircuit<C1, C2, RU, IU, W, A, AVar, D>
 where
     RU::Var: AbsorbGadget<CF1<C1>> + CommittedInstanceVarOps<CF1<C1>, PointVar = NonNativeAffineVar<C1>>,
+    IU::Var: CommittedInstanceVarOps<CF1<C1>, PointVar = NonNativeAffineVar<C1>>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<CF1<C1>>) -> Result<(), SynthesisError> {
         let arith = AVar::new_witness(cs.clone(), || Ok(&self.arith))?;
@@ -197,8 +242,23 @@ where
         let z_0 = Vec::new_input(cs.clone(), || Ok(self.z_0))?;
         let z_i = Vec::new_input(cs.clone(), || Ok(self.z_i))?;
 
+        // The commitments of `U_i` and `u_i` are folded outside the circuit
+        // (check 6.2). They therefore belong to the statement: as witnesses,
+        // the onchain fold would be an equation over three values the prover
+        // chooses freely, and would enforce nothing.
+        let U_i_cm = self.U_i.get_commitments();
+        let u_i_cm = self.u_i.get_commitments();
+
         let u_i = IU::Var::new_witness(cs.clone(), || Ok(self.u_i))?;
         let U_i = RU::Var::new_witness(cs.clone(), || Ok(self.U_i))?;
+
+        let U_i_commitments =
+            Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || Ok(U_i_cm))?;
+        let u_i_commitments =
+            Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || Ok(u_i_cm))?;
+        U_i.get_commitments().enforce_equal(&U_i_commitments)?;
+        u_i.get_commitments().enforce_equal(&u_i_commitments)?;
+
         // here (U_i1, W_i1) = NIFS.P( (U_i,W_i), (u_i,w_i))
         let U_i1_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
             Ok(self.U_i1.get_commitments())

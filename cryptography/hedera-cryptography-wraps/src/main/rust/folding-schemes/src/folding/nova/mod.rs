@@ -184,19 +184,29 @@ pub struct Witness<C: Curve> {
 }
 
 impl<C: Curve> Witness<C> {
+    /// Creates the witness of an *incoming* instance, whose error term is the
+    /// all-zero vector.
+    ///
+    /// `rE` is therefore always zero, even when `H` (hiding) is set: an
+    /// incoming instance's `cmE` is pinned to the identity (`check_incoming`
+    /// enforces it, and `AugmentedFCircuit` allocates it as a constant), so a
+    /// non-zero `rE` would make `cmE != Com(E, rE)` and break the additive
+    /// homomorphism the folding scheme relies on — the folded witness would
+    /// carry an `r^2 * rE` term with no counterpart in the folded commitment.
+    /// Blinding `E` here would be vacuous anyway, since `E = 0` is public.
+    /// Hiding of a *running* instance's `E` comes from the zero-knowledge layer
+    /// instead, which folds in a sampled instance with `E != 0` and a genuine
+    /// `Com(E, rE)` (see [`crate::arith::ArithSampler`] and [`super::nova::zk`]).
     pub fn new<const H: bool>(w: Vec<C::ScalarField>, e_len: usize, mut rng: impl RngCore) -> Self {
-        let (rW, rE) = if H {
-            (
-                C::ScalarField::rand(&mut rng),
-                C::ScalarField::rand(&mut rng),
-            )
+        let rW = if H {
+            C::ScalarField::rand(&mut rng)
         } else {
-            (C::ScalarField::zero(), C::ScalarField::zero())
+            C::ScalarField::zero()
         };
 
         Self {
             E: vec![C::ScalarField::zero(); e_len],
-            rE,
+            rE: C::ScalarField::zero(),
             W: w,
             rW,
         }
@@ -218,6 +228,34 @@ impl<C: Curve> Witness<C> {
             cmW,
             x,
         })
+    }
+}
+
+impl<C: Curve> Witness<C> {
+    /// Checks that the commitments in `u` open to `self`, i.e. that
+    /// `u.cmW = Com(W)` and `u.cmE = Com(E)`, following the same convention as
+    /// [`Witness::commit`] that an all-zero `E` commits to the identity.
+    ///
+    /// [Nova]'s Definition 12 makes this part of what it means for a witness to
+    /// *satisfy* a committed relaxed R1CS instance, and it is load-bearing:
+    /// without it, every relaxed R1CS instance is trivially satisfiable (pick
+    /// any `W`, then set `E := Az∘Bz - u·Cz`), so the algebraic check alone
+    /// attests to nothing and the folding scheme's knowledge soundness has
+    /// nothing to extract from.
+    ///
+    /// [Nova]: https://eprint.iacr.org/2021/370.pdf
+    pub fn check_openings<CS: CommitmentScheme<C, HC>, const HC: bool>(
+        &self,
+        params: &CS::ProverParams,
+        u: &CommittedInstance<C>,
+    ) -> Result<(), Error> {
+        // recomputing through `commit` keeps the two in lockstep, in particular
+        // the `E = 0 => cmE = 0` convention
+        let expected = self.commit::<CS, HC>(params, u.x.clone())?;
+        if expected.cmW != u.cmW || expected.cmE != u.cmE {
+            return Err(Error::CommitmentVerificationFail);
+        }
+        Ok(())
     }
 }
 
@@ -376,6 +414,19 @@ where
     pub cs_vp: CS1::VerifierParams,
     /// Verification parameters of the underlying commitment scheme over C2
     pub cf_cs_vp: CS2::VerifierParams,
+    /// Commitment key of the underlying commitment scheme over C1.
+    ///
+    /// Needed by [`FoldingScheme::verify`] to check that the commitments in an
+    /// `IVCProof` open to the witnesses it carries, as required by [Nova]'s
+    /// Definition 12. `CS1::VerifierParams` is not enough for this: a KZG
+    /// verifier key carries no `powers_of_g`, so a commitment cannot be
+    /// recomputed from it.
+    ///
+    /// [Nova]: https://eprint.iacr.org/2021/370.pdf
+    pub cs_ck: CS1::ProverParams,
+    /// Commitment key of the underlying commitment scheme over C2, used for
+    /// the same purpose as `cs_ck` on the CycleFold instance.
+    pub cf_cs_ck: CS2::ProverParams,
 }
 
 impl<C1, C2, CS1, CS2, const H: bool> Valid for VerifierParams<C1, C2, CS1, CS2, H>
@@ -388,6 +439,8 @@ where
     fn check(&self) -> Result<(), ark_serialize::SerializationError> {
         self.cs_vp.check()?;
         self.cf_cs_vp.check()?;
+        self.cs_ck.check()?;
+        self.cf_cs_ck.check()?;
         Ok(())
     }
 }
@@ -404,11 +457,16 @@ where
         compress: ark_serialize::Compress,
     ) -> Result<(), ark_serialize::SerializationError> {
         self.cs_vp.serialize_with_mode(&mut writer, compress)?;
-        self.cf_cs_vp.serialize_with_mode(&mut writer, compress)
+        self.cf_cs_vp.serialize_with_mode(&mut writer, compress)?;
+        self.cs_ck.serialize_with_mode(&mut writer, compress)?;
+        self.cf_cs_ck.serialize_with_mode(&mut writer, compress)
     }
 
     fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
-        self.cs_vp.serialized_size(compress) + self.cf_cs_vp.serialized_size(compress)
+        self.cs_vp.serialized_size(compress)
+            + self.cf_cs_vp.serialized_size(compress)
+            + self.cs_ck.serialized_size(compress)
+            + self.cf_cs_ck.serialized_size(compress)
     }
 }
 
@@ -557,6 +615,8 @@ where
 
         let cs_vp = CS1::VerifierParams::deserialize_with_mode(&mut reader, compress, validate)?;
         let cf_cs_vp = CS2::VerifierParams::deserialize_with_mode(&mut reader, compress, validate)?;
+        let cs_ck = CS1::ProverParams::deserialize_with_mode(&mut reader, compress, validate)?;
+        let cf_cs_ck = CS2::ProverParams::deserialize_with_mode(&mut reader, compress, validate)?;
 
         Ok(Self::VerifierParam {
             poseidon_config,
@@ -564,6 +624,8 @@ where
             cf_r1cs,
             cs_vp,
             cf_cs_vp,
+            cs_ck,
+            cf_cs_ck,
         })
     }
 
@@ -609,6 +671,8 @@ where
             cf_r1cs,
             cs_vp,
             cf_cs_vp,
+            cs_ck: cs_pp.clone(),
+            cf_cs_ck: cf_cs_pp.clone(),
         };
 
         Ok((prover_params, verifier_params))
@@ -682,12 +746,14 @@ where
         _other_instances: Option<Self::MultiCommittedInstanceWithWitness>,
     ) -> Result<(), Error> {
         // ensure that commitments are blinding if user has specified so.
+        // Only the `W` blinders are checked: `rE` is zero by construction for
+        // incoming instances, and stays zero under folding, see `Witness::new`.
         if H && self.i >= C1::ScalarField::one() {
             let blinding_commitments = if self.i == C1::ScalarField::one() {
                 // blinding values of the running instances are zero at the first iteration
-                vec![self.w_i.rW, self.w_i.rE]
+                vec![self.w_i.rW]
             } else {
-                vec![self.w_i.rW, self.w_i.rE, self.W_i.rW, self.W_i.rE]
+                vec![self.w_i.rW, self.W_i.rW]
             };
             if blinding_commitments.contains(&C1::ScalarField::zero()) {
                 return Err(Error::IncorrectBlinding(
@@ -990,12 +1056,29 @@ where
         // check R1CS satisfiability, which is equivalent to checking if `u_i`
         // is an incoming instance and if `w_i` and `u_i` satisfy RelaxedR1CS
         u_i.check_incoming()?;
+        // `u_i` is an incoming instance, so its error term is zero. This is
+        // implied by `u_i.cmE = 0` plus the opening check below, but asserting
+        // it directly turns the next line into a genuine *plain* R1CS check.
+        if !is_zero_vec(&w_i.E) {
+            return Err(Error::R1CSUnrelaxedFail);
+        }
         vp.r1cs.check_relation(&w_i, &u_i)?;
         // check RelaxedR1CS satisfiability
         vp.r1cs.check_relation(&W_i, &U_i)?;
 
         // check CycleFold RelaxedR1CS satisfiability
         vp.cf_r1cs.check_relation(&cf_W_i, &cf_U_i)?;
+
+        // Check that the commitments open to the witnesses above. Per [Nova]'s
+        // Definition 12 this is part of what it means for a witness to satisfy
+        // a committed relaxed R1CS instance, and it is what makes the checks
+        // above meaningful: on their own they are trivially satisfiable, since
+        // `E` is a free vector.
+        //
+        // [Nova]: https://eprint.iacr.org/2021/370.pdf
+        w_i.check_openings::<CS1, H>(&vp.cs_ck, &u_i)?;
+        W_i.check_openings::<CS1, H>(&vp.cs_ck, &U_i)?;
+        cf_W_i.check_openings::<CS2, H>(&vp.cf_cs_ck, &cf_U_i)?;
 
         Ok(())
     }
@@ -1073,6 +1156,81 @@ pub mod tests {
             F_circuit,
             3,
         )?;
+        Ok(())
+    }
+
+    /// A valid `IVCProof` must attest to the computation it claims. Fabricating
+    /// one - arbitrary instances plus a free error vector, which satisfies the
+    /// relaxed R1CS relation for *any* public IO - must be rejected. That only
+    /// holds if the commitment openings are checked, as [Nova]'s Definition 12
+    /// requires; the algebraic checks alone are trivially satisfiable.
+    ///
+    /// [Nova]: https://eprint.iacr.org/2021/370.pdf
+    #[test]
+    fn test_ivc_verify_rejects_fabricated_proof() -> Result<(), Error> {
+        type NN = Nova<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            Pedersen<Projective>,
+            Pedersen<Projective2>,
+            false,
+        >;
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let poseidon_config = poseidon_canonical_config::<Fr>();
+        let f_circuit = CubicFCircuit::<Fr>::new(())?;
+        let prep_param = PreprocessorParam::<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            Pedersen<Projective>,
+            Pedersen<Projective2>,
+            false,
+        >::new(poseidon_config, f_circuit);
+        let params = NN::preprocess(&mut rng, &prep_param)?;
+        let vp = params.1.clone();
+        let mut nova = NN::init(&params, f_circuit, vec![Fr::from(3_u32)])?;
+        nova.prove_step(&mut rng, (), None)?;
+        nova.prove_step(&mut rng, (), None)?;
+
+        // the honest proof verifies
+        NN::verify(vp.clone(), nova.ivc_proof())?;
+
+        // Fabricate a proof for an arbitrary `z_i`: all-zero instances satisfy
+        // the relaxed relation trivially, the two hashes are recomputed to
+        // match, and `w_i.E` is chosen to absorb whatever the relation
+        // evaluates to.
+        let sponge = PoseidonSponge::<Fr>::new_with_pp_hash(&vp.poseidon_config, vp.pp_hash()?);
+        let mut forged = nova.ivc_proof();
+        forged.z_i = vec![Fr::from(424242u64)];
+        forged.U_i = CommittedInstance::dummy(&vp.r1cs);
+        forged.W_i = Witness::dummy(&vp.r1cs);
+        forged.cf_U_i = CycleFoldCommittedInstance::dummy(&vp.cf_r1cs);
+        forged.cf_W_i = CycleFoldWitness::dummy(&vp.cf_r1cs);
+        forged.u_i = CommittedInstance {
+            cmE: Projective::zero(),
+            u: Fr::one(),
+            cmW: Projective::zero(),
+            x: vec![
+                forged.U_i.hash(&sponge, forged.i, &forged.z_0, &forged.z_i),
+                forged.cf_U_i.hash_cyclefold(&sponge),
+            ],
+        };
+        forged.w_i = Witness::dummy(&vp.r1cs);
+        forged.w_i.E = vp
+            .r1cs
+            .eval_at_z(&[&[forged.u_i.u][..], &forged.u_i.x, &forged.w_i.W].concat())?;
+
+        // the premise of the test: every algebraic check on its own passes
+        vp.r1cs.check_relation(&forged.w_i, &forged.u_i)?;
+        vp.r1cs.check_relation(&forged.W_i, &forged.U_i)?;
+        vp.cf_r1cs.check_relation(&forged.cf_W_i, &forged.cf_U_i)?;
+
+        assert!(
+            NN::verify(vp, forged).is_err(),
+            "a fabricated IVCProof was accepted"
+        );
         Ok(())
     }
 

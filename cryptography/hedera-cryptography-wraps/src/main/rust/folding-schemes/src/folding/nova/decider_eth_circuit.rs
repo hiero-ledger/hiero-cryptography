@@ -8,6 +8,8 @@ use ark_crypto_primitives::sponge::poseidon::{constraints::PoseidonSpongeVar, Po
 use ark_ff::{BigInteger, PrimeField};
 use ark_r1cs_std::{
     alloc::{AllocVar, AllocationMode},
+    boolean::Boolean,
+    eq::EqGadget,
     fields::fp::FpVar,
     GR1CSVar,
 };
@@ -172,11 +174,18 @@ impl<C: Curve>
         U_vec: Vec<FpVar<CF1<C>>>,
         u: CommittedInstanceVar<C>,
         proof: C,
-        _randomness: CF1<C>,
+        randomness: CF1<C>,
     ) -> Result<CommittedInstanceVar<C>, SynthesisError> {
         let cs = U.u.cs();
         let cmT = NonNativeAffineVar::new_input(cs.clone(), || Ok(proof))?;
-        let (new_U, _) = NIFSGadget::verify(transcript, U, U_vec, u, Some(cmT))?;
+        // `r` is consumed by the *onchain* commitment fold (check 6.2), which
+        // cannot re-derive it: its transcript preimage `U_i`, `u_i` lives in
+        // the witness. So allocate it as a public input and bind it to the
+        // challenge actually used in-circuit, ensuring that both halves of
+        // `NIFS.V` fold with the same `r`.
+        let r = FpVar::new_input(cs.clone(), || Ok(randomness))?;
+        let (new_U, r_bits) = NIFSGadget::verify(transcript, U, U_vec, u, Some(cmT))?;
+        Boolean::le_bits_to_fp(&r_bits)?.enforce_equal(&r)?;
         Ok(new_U)
     }
 
@@ -198,6 +207,11 @@ impl<C: Curve>
         let cmE = U_cmE + cmT.mul(r);
         Ok(vec![cmW, cmE])
     }
+
+    /// `fold_field_elements_gadget` allocates `cmT` first, then `r`.
+    fn inputize_proof_and_randomness(proof: &C, randomness: &CF1<C>) -> Vec<CF1<C>> {
+        [proof.inputize_nonnative(), vec![*randomness]].concat()
+    }
 }
 
 #[cfg(test)]
@@ -209,10 +223,57 @@ pub mod tests {
 
     use super::*;
     use crate::commitment::pedersen::Pedersen;
+    use crate::folding::circuits::decider::on_chain::onchain_decider_public_input;
     use crate::folding::nova::PreprocessorParam;
+    use crate::folding::traits::CommittedInstanceOps;
     use crate::frontend::utils::CubicFCircuit;
     use crate::transcript::poseidon::poseidon_canonical_config;
     use crate::FoldingScheme;
+
+    type N = Nova<
+        Projective,
+        Projective2,
+        CubicFCircuit<Fr>,
+        Pedersen<Projective>,
+        Pedersen<Projective2>,
+        false,
+    >;
+
+    /// Reaches `DeciderEnabledNIFS::inputize_proof_and_randomness`
+    /// unambiguously from the tests.
+    fn inputize_proof_and_randomness(proof: &Projective, randomness: &Fr) -> Vec<Fr> {
+        <DeciderNovaGadget as DeciderEnabledNIFS<
+            Projective,
+            CommittedInstance<Projective>,
+            CommittedInstance<Projective>,
+            Witness<Projective>,
+            R1CS<Fr>,
+        >>::inputize_proof_and_randomness(proof, randomness)
+    }
+
+    /// Runs `n_steps` of the IVC and returns the resulting Decider circuit.
+    fn honest_decider_circuit(
+        n_steps: usize,
+    ) -> Result<DeciderEthCircuit<Projective, Projective2>, Error> {
+        let mut rng = StdRng::seed_from_u64(0);
+        let poseidon_config = poseidon_canonical_config::<Fr>();
+        let f_circuit = CubicFCircuit::<Fr>::new(())?;
+
+        let prep_param = PreprocessorParam::<
+            Projective,
+            Projective2,
+            CubicFCircuit<Fr>,
+            Pedersen<Projective>,
+            Pedersen<Projective2>,
+            false,
+        >::new(poseidon_config, f_circuit);
+        let nova_params = N::preprocess(&mut rng, &prep_param)?;
+        let mut nova = N::init(&nova_params, f_circuit, vec![Fr::from(3_u32)])?;
+        for _ in 0..n_steps {
+            nova.prove_step(&mut rng, (), None)?;
+        }
+        DeciderEthCircuit::<Projective, Projective2>::try_from(nova)
+    }
 
     #[test]
     fn test_decider_circuit() -> Result<(), Error> {
@@ -256,6 +317,64 @@ pub mod tests {
         decider_circuit.generate_constraints(cs.clone())?;
         assert!(cs.is_satisfied()?);
 
+        Ok(())
+    }
+
+    /// The `r` that the onchain check 6.2 folds the commitments with must be
+    /// bound to the challenge the circuit derives from its own transcript.
+    /// Without that binding the two halves of `NIFS.V` can be run with
+    /// different randomness, and check 6.2 constrains nothing.
+    #[test]
+    fn test_decider_circuit_binds_folding_randomness() -> Result<(), Error> {
+        // an honest circuit is satisfied
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        honest_decider_circuit(2)?.generate_constraints(cs.clone())?;
+        assert!(cs.is_satisfied()?);
+
+        // the same circuit, with the `r` handed to the onchain fold perturbed
+        let mut circuit = honest_decider_circuit(2)?;
+        circuit.randomness += Fr::from(1u32);
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        circuit.generate_constraints(cs.clone())?;
+        assert!(
+            !cs.is_satisfied()?,
+            "`r` used by the onchain fold is not bound to the in-circuit challenge"
+        );
+        Ok(())
+    }
+
+    /// `Decider::verify` rebuilds the circuit's public input from the proof, so
+    /// the layout in `onchain_decider_public_input` and the order in which
+    /// `generate_constraints` allocates its public inputs must agree exactly.
+    ///
+    /// This also pins down *which* values are in the statement: in particular
+    /// `U_i`'s and `u_i`'s commitments and the folding randomness, which the
+    /// onchain check 6.2 consumes and which would otherwise be free.
+    #[test]
+    fn test_onchain_decider_public_input_layout() -> Result<(), Error> {
+        let circuit = honest_decider_circuit(2)?;
+
+        let expected = onchain_decider_public_input::<Projective>(
+            circuit.pp_hash,
+            circuit.i,
+            &circuit.z_0,
+            &circuit.z_i,
+            &circuit.U_i.get_commitments(),
+            &circuit.u_i.get_commitments(),
+            &circuit.U_i1.get_commitments(),
+            &circuit.kzg_challenges,
+            &circuit.kzg_evaluations,
+            &inputize_proof_and_randomness(&circuit.proof, &circuit.randomness),
+        );
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        circuit.generate_constraints(cs.clone())?;
+        assert!(cs.is_satisfied()?);
+        let cs = cs.into_inner().ok_or(Error::NoInnerConstraintSystem)?;
+
+        // `instance_assignment()[0]` is the constant term 1
+        assert_eq!(&cs.instance_assignment()?[1..], &expected[..]);
         Ok(())
     }
 }

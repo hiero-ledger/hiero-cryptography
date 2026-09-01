@@ -29,7 +29,7 @@ use rand_chacha::rand_core::SeedableRng;
 
 /********************************* Imports *********************************/
 
-use ark_ec::{PrimeGroup, CurveGroup};
+use ark_ec::{AffineRepr, PrimeGroup, CurveGroup};
 use ark_ff::{field_hashers::{DefaultFieldHasher, HashToField}, BigInteger, PrimeField, ToConstraintField};
 use ark_r1cs_std::{
     alloc::{AllocVar, AllocationMode},
@@ -512,6 +512,14 @@ fn verify_addressbook(ab: &AddressBook) -> Result<bool, WRAPSError> {
     for ((pk, pok), weight, _node_id) in ab.iter() {
         if *pk == sentinel {
             continue;
+        }
+
+        // The proof of knowledge below is trivially satisfiable for the identity: its equation
+        // multiplies the public key by the challenge, so that term vanishes at sk = 0 and any
+        // (commitment, response) pair with commitment = g^response verifies. An identity entry
+        // would then carry weight into the aggregate without contributing to the aggregate key.
+        if pk.is_zero() {
+            return Ok(false);
         }
 
         // check range [0, 2^64) of weight
@@ -1778,6 +1786,34 @@ mod tests {
         assert!(ab.iter().any(|abe| abe.0.0 != sentinel));
 
         assert!(verify_addressbook(&ab).unwrap());
+    }
+
+    /// The proof of knowledge cannot speak for the identity: its equation multiplies the public
+    /// key by the challenge, so at sk = 0 that term drops out and any commitment = g^response
+    /// satisfies it. Such an entry would carry weight into the aggregate while contributing
+    /// nothing to the aggregate key, so the address book has to reject it outright.
+    #[test]
+    fn verify_addressbook_rejects_identity_key() {
+        let rng = &mut thread_rng();
+
+        // sanity: an ordinary key is accepted in this position
+        let honest: AddressBook = vec![(WRAPS::keygen(rng.gen()).unwrap().1, Fr::from(500u64), Fr::from(0u64))];
+        assert!(verify_addressbook(&honest).unwrap());
+
+        // forge a proof of knowledge for the identity: pick any response, set the commitment to
+        // g^response, and take the challenge the random oracle gives for that pair
+        let g = JubJub::generator();
+        let identity = <JubJub as CurveGroup>::Affine::zero();
+        let response = JubJubFr::from(12345u64);
+        let commitment = (g * response).into_affine();
+        let challenge = proof_of_knowledge_random_oracle(g, identity, commitment).unwrap();
+        let forged = SchnorrPoK { commitment, challenge, response };
+
+        // the forged proof does satisfy the equation -- that is the whole problem
+        assert!(verify_proof_of_knowledge(&forged, &identity).unwrap());
+
+        let bad: AddressBook = vec![((identity, forged), Fr::from(500u64), Fr::from(0u64))];
+        assert!(!verify_addressbook(&bad).unwrap());
     }
 
     #[test]

@@ -1009,6 +1009,14 @@ impl WRAPS {
 
         let (bitvector, signature) = multisignature;
 
+        // The zips below stop at the shorter of the two, so a bit past the end of the book is
+        // silently dropped here while the circuit, which always sees 128 padded entries, would
+        // select the padding entry it points at. Refuse the input rather than read it differently
+        // from the circuit. No effect on a padded book, where every bit has an entry.
+        if bitvector.iter().skip(address_book.len()).any(|&is_present| is_present) {
+            return Ok(false);
+        }
+
         let public_keys: Vec<SchnorrPubKey> = address_book.iter()
             .zip(bitvector.iter())
             .filter_map(|(abe, &is_present)| if is_present { Some(abe.0.0.clone()) } else { None })
@@ -1858,6 +1866,26 @@ mod tests {
         assert_eq!(pok1.commitment, pok2.commitment);
         assert_eq!(pok1.challenge, pok2.challenge);
         assert_eq!(pok1.response, pok2.response);
+    }
+
+    /// A bit past the end of the book is dropped by the zips in `verify_signature` but selects a
+    /// padding entry in the circuit, which always sees 128 entries. That leaves the two reading
+    /// the same signature differently, so the input has to be refused rather than reinterpreted.
+    #[test]
+    fn verify_signature_rejects_a_bit_past_the_address_book() {
+        let (ab, keys) = create_new_addressbook();
+        assert!(ab.len() < MAX_AB_SIZE, "test needs room past the end of the book");
+
+        let bitvector = sufficient_bitvector(&ab);
+        let message: &[u8] = b"bit past the end of the book";
+        let multi_signature = threshold_sign(message, &ab, &keys, &bitvector);
+
+        // sanity: the signature verifies exactly as produced
+        assert!(WRAPS::verify_signature(&ab, message, &multi_signature).unwrap());
+
+        let mut tampered = multi_signature.clone();
+        tampered.0[ab.len()] = true;
+        assert!(!WRAPS::verify_signature(&ab, message, &tampered).unwrap());
     }
 
     #[test]

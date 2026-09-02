@@ -1213,8 +1213,13 @@ impl WRAPS {
         // Build the message the committee signed to authorize the rotation.
         let ab_rotation_message: Vec<u8> = Self::compute_rotation_message(&padded_next_ab, hints_vk.as_ref())?;
 
+        // Verify against the padded book, not `prev_ab`. The circuit consumes the padded book and
+        // the full 128-bit bitvector, so verifying against the unpadded one leaves the two reading
+        // the same signature differently: bits at or past `prev_ab.len()` are silently dropped
+        // here but select padding entries in-circuit. Identical result for a well-formed
+        // bitvector, since padding entries are never selected.
         let sig_verification = Self::verify_signature(
-            prev_ab,
+            &padded_prev_ab,
             &ab_rotation_message,
             multi_signature
         )?;
@@ -1816,6 +1821,24 @@ mod tests {
         assert!(!verify_addressbook(&bad).unwrap());
     }
 
+    /// `construct_wraps_proof` verifies the multisignature against the *padded* book, so the
+    /// identity guard above now runs over padding entries too. Padding is a real keypair derived
+    /// from an all-zero seed, not the identity -- pin that, since the guard would otherwise reject
+    /// every padded book.
+    #[test]
+    fn padded_addressbook_still_verifies() {
+        let dummy = WRAPS::keygen([0; 32]).unwrap();
+        assert!(!dummy.1.0.is_zero(), "padding key must not be the identity");
+
+        let rng = &mut thread_rng();
+        let ab: AddressBook = (0..3)
+            .map(|i| (WRAPS::keygen(rng.gen()).unwrap().1, Fr::from(500u64), Fr::from(i as u64)))
+            .collect();
+        let padded = pad_addressbook(&ab).unwrap();
+        assert_eq!(padded.len(), MAX_AB_SIZE);
+        assert!(verify_addressbook(&padded).unwrap());
+    }
+
     #[test]
     fn sentinel_key_attested_pok_verifies_and_is_deterministic() {
         use ark_ec::AffineRepr;
@@ -1865,3 +1888,4 @@ mod tests {
         );
     }
 }
+

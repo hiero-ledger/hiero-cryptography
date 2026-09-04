@@ -431,7 +431,9 @@ public class HintsLibraryBridge {
     // Returns true if the n is a positive power of two, and the crs isn't null and its length matches or is greater
     // than the n.
     private static boolean validateCRS(final byte[] crs, final int n) {
-        return n > 0 && (n & (n - 1)) == 0 && crs != null && crs.length >= (304 + n * 288);
+        // 304L, not 304: in int arithmetic n * 288 overflows, and for n of 2^27 through 2^30
+        // it wraps to exactly 0, leaving the check as crs.length >= 304.
+        return n > 0 && (n & (n - 1)) == 0 && crs != null && crs.length >= (304L + (long) n * 288);
     }
 
     private static int inferNFromCRSLength(final byte[] crs) {

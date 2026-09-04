@@ -1476,10 +1476,10 @@ mod tests {
         bitmap
     }
 
-    /// Every length prefix we deserialize is attacker supplied, so arkworks pre-sizing a Vec
-    /// from one would be an allocation-abort primitive that catch_unwind cannot catch. This
-    /// pins the behaviour rather than a version: published ark-serialize 0.5.0 does pre-size,
-    /// so a future bump could reintroduce it silently.
+    /// Deserialization must size a collection from what it actually reads, not from the
+    /// declared length prefix, which is untrusted and unbounded. This pins the behaviour
+    /// rather than a version: the pinned revision does not pre-size, a released one does,
+    /// so a dependency change could alter it with no change here. Don't relax this test.
     #[test]
     fn test_vec_deserialization_does_not_preallocate() {
         let huge_length_prefix = (1u64 << 40).to_le_bytes();

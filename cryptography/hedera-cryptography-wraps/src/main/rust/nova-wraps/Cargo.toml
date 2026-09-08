@@ -1,0 +1,62 @@
+[package]
+name = "wraps"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88.0"
+description = "Address-book rotation attested by a weighted Schnorr multisignature, folded with Nova"
+license = "MIT OR Apache-2.0"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Resolved from crates.io. `io` is what pulls in the powers-of-tau loader that
+# `WRAPS::setup_public_params` needs; the rest of the default feature set is not
+# used here.
+nova-snark = { version = "0.76", default-features = false, features = ["io"] }
+
+ff = { version = "0.13.0", features = ["derive"] }
+generic-array = "1.2.0"
+serde = { version = "1.0.217", features = ["derive"] }
+# Fixed-size signer arrays exceed serde's built-in array implementations.
+serde_arrays = "0.2"
+bincode = { version = "2", features = ["serde", "std"] }
+flate2 = "1.0.35"
+sha2 = "0.10.7"
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+rand_chacha = "0.3"
+
+[dev-dependencies]
+rand = "0.8.5"
+# The demo constructs field elements directly.
+ff = { version = "0.13.0", features = ["derive"] }
+
+# `halo2curves` 0.9.0 ships a leftover `println!` inside `exp_by_x`
+# (`src/bn256/curve.rs`) that fires 62 times per call. The BN254 G2 subgroup check
+# reaches it whenever a G2 point is parsed, so loading the SRS and reading a verifier
+# key each spray stdout with `true`/`false`. It is gated on halo2curves' `std` feature
+# alone, which `nova-snark` cannot give up — its ptau serialization needs the `std`-only
+# `SerdeObject` methods, and `provider::msm` delegates full-width-scalar MSMs to
+# `msm_best`, whose parallelism comes from `plonky2_maybe_rayon/parallel`. So the print
+# cannot be turned off with features.
+#
+# `halo2curves/` is upstream at the `v0.9.0` tag, vendored, with that one hunk removed
+# and a `[lints.rust]` block added to its manifest — a path source does not get
+# `--cap-lints=allow` the way a registry one does, so the crate's 13 pre-existing
+# warnings would otherwise replay on every build here. Nothing else differs; see the
+# README for the exact delta. The patch applies to the whole graph, so `nova-snark`
+# picks it up too. Drop this section, and the directory, once the print is gone upstream.
+[patch.crates-io]
+halo2curves = { path = "halo2curves" }
+
+[profile.bench]
+opt-level = 3
+
+[profile.test]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"
+lto = "fat"
+strip = true
+debug = false
+opt-level = 3
+codegen-units = 1

@@ -1881,9 +1881,9 @@ fn artifact_sizes() {
   let pp_bytes = encode(wraps_pp).unwrap().len();
   let prover_key_bytes = encode(wraps_pk).unwrap().len();
   let verification_key_bytes = encode(wraps_vk).unwrap().len();
-  // What a standalone verifier is actually shipped: `vk` alone, deflated. It never
-  // touches the folding parameters, so `pp` is not part of it.
-  let compressed_vk_bytes = WRAPS::get_compressed_verification_key_bytes(wraps_vk)
+  // A standalone verifier receives `vk` alone, encoded with bincode.
+  // It never touches the folding parameters, so `pp` is not part of the payload.
+  let verifier_key_payload_bytes = WRAPS::get_compressed_verification_key_bytes(wraps_vk)
     .unwrap()
     .len();
 
@@ -1922,9 +1922,9 @@ fn artifact_sizes() {
     compressed.len() < running.len() / 100,
     "compression should buy two orders of magnitude"
   );
-  assert!(
-    compressed_vk_bytes <= verification_key_bytes,
-    "deflating must not grow the verification key"
+  assert_eq!(
+    verifier_key_payload_bytes, verification_key_bytes,
+    "the verification-key payload uses the ordinary bincode encoding"
   );
 
   // Absolute guards, generously sized.
@@ -1943,8 +1943,8 @@ fn artifact_sizes() {
     running.len()
   );
   assert!(
-    compressed_vk_bytes < 32 * 1024 * 1024,
-    "compressed vk: {compressed_vk_bytes} bytes"
+    verifier_key_payload_bytes < 64 * 1024 * 1024,
+    "verification key (bincode): {verifier_key_payload_bytes} bytes"
   );
   assert!(
     prover_key_bytes < 512 * 1024 * 1024,

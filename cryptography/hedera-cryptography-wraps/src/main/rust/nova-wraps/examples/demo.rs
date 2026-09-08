@@ -58,7 +58,7 @@ fn main() {
 
   let vk_bytes = WRAPS::get_compressed_verification_key_bytes(&wraps_vk).unwrap();
   println!(
-    "Verification key payload: {} bytes (deflated)",
+    "Verification key payload: {} bytes (bincode)",
     vk_bytes.len()
   );
   let vk_bytes = round_trip(

@@ -94,7 +94,7 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, WrapsError> {
 }
 
 /// Serializes a value with bincode and compresses it with zlib.
-pub(crate) fn encode_compressed<T: Serialize>(value: &T) -> Result<Vec<u8>, WrapsError> {
+pub(crate) fn _encode_compressed<T: Serialize>(value: &T) -> Result<Vec<u8>, WrapsError> {
   let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
   bincode::serde::encode_into_std_write(value, &mut encoder, bincode::config::legacy())
     .map_err(|e| WrapsError::cryptography(format!("serialization failed: {e}")))?;
@@ -104,8 +104,8 @@ pub(crate) fn encode_compressed<T: Serialize>(value: &T) -> Result<Vec<u8>, Wrap
     .map_err(|e| WrapsError::cryptography(format!("deflate failed: {e}")))
 }
 
-/// The inverse of [`encode_compressed`].
-pub(crate) fn decode_compressed<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, WrapsError> {
+/// The inverse of [`_encode_compressed`].
+pub(crate) fn _decode_compressed<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, WrapsError> {
   let mut decoder = ZlibDecoder::new(bytes);
 
   bincode::serde::decode_from_std_read(&mut decoder, bincode::config::legacy())

@@ -9,10 +9,7 @@ use crate::{
     Multisig, RoundMessage, Schnorr, SchnorrAttestedPubKey, SchnorrPoK, SchnorrPoKChallenge,
     SchnorrPublicKey, SchnorrResponse, SchnorrSecretKey, Signature,
   },
-  utils::{
-    decode, decode_compressed, encode, encode_compressed, encode_point, expand_seed, pad_bitvector,
-    BitVector,
-  },
+  utils::{decode, encode, encode_point, expand_seed, pad_bitvector, BitVector},
 };
 use ff::Field;
 use nova_snark::{
@@ -679,12 +676,12 @@ impl WRAPS {
       .map_err(|e| WrapsError::cryptography(format!("compressing SNARK setup failed: {e}")))
   }
 
-  /// Serializes the verifier key a standalone verifier needs.
+  /// Serializes the verifier key a standalone verifier needs using plain bincode.
   ///
   /// Only `vk` is emitted; `pp` stays with whoever ran the setup, since a verifier that
   /// has the compressed proof never touches the folding parameters.
   pub fn get_compressed_verification_key_bytes(vk: &VerifierKey) -> Result<Vec<u8>, WrapsError> {
-    encode_compressed(vk)
+    encode(vk)
   }
 
   /// Folds one rotation into the chain and compresses the result.
@@ -856,7 +853,7 @@ impl WRAPS {
 
   /// Checks a compressed proof against a serialized verifier key.
   ///
-  /// The proof uses plain bincode encoding; the verifier key uses zlib-compressed bincode.
+  /// The proof and verifier key both use plain bincode encoding.
   ///
   /// Beyond the SNARK itself this pins the two ends of the chain: it must start at
   /// `ab_genesis_hash` and must currently carry `hints_vk`. Without those a valid proof
@@ -867,7 +864,7 @@ impl WRAPS {
     ab_genesis_hash: &AddressBookHash<E2>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
-    let vk = decode_compressed::<VerifierKey>(compressed_vk_serialized)?;
+    let vk = decode::<VerifierKey>(compressed_vk_serialized)?;
     let proof = decode::<CompressedWrapsProof>(proof_serialized)?;
 
     if proof.z0.len() != 2 || proof.zi.len() != 2 {

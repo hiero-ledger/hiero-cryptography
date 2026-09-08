@@ -63,7 +63,7 @@ fn main() {
       .expect("verifier key setup"),
   );
   let vk_bytes = round_trip(
-    "compressed verification key: Vec<u8>",
+    "verification key: Vec<u8>",
     &setup_timings
       .measure("WRAPS::get_compressed_verification_key_bytes", || {
         WRAPS::get_compressed_verification_key_bytes(&vk)
@@ -90,7 +90,7 @@ fn main() {
     report.size("PublicParams", &pp);
     report.size("ProverKey", &pk);
     report.size("VerifierKey", &vk);
-    report.artifact("Compressed verification key (zlib)", vk_bytes.len());
+    report.artifact("Verification key (bincode)", vk_bytes.len());
     report.size("AddressBookHash<E2>", &genesis_hash);
     report_address_book_types(&mut report, &previous.0, &previous.1);
 

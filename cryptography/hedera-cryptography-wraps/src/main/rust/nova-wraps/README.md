@@ -46,7 +46,7 @@ values into signing, proof construction, and verification. It reports the shared
 parameters and keys once, one representative member's key generation and signing
 arguments per book/phase, and the complete round broadcasts as encoded `RoundMessage`
 bytes.
-Reported return sizes cover successful payloads; raw proof and compressed-key sizes
+Reported return sizes cover successful payloads; raw proof and verifier-key sizes
 are printed separately from the surrounding bincode envelopes. Secret keys and seeds
 are measured without printing their contents.
 
@@ -86,9 +86,10 @@ expected genesis hash and hints verification key.
 
 `CompressedWrapsProof` is Nova's compressed SNARK, serialized directly with `encode`
 using bincode. Its byte length is deterministic for a fixed circuit shape; there is
-no additional zlib compression. Verification keys remain zlib-compressed. Previously
-zlib-compressed proof payloads must be decompressed before verification with the current
-API; this encoding change requires no new proof, public parameters, or keys.
+no additional zlib compression. Verification keys also use plain bincode encoding.
+Previously zlib-compressed proof and verifier-key payloads must be decompressed before
+verification with the current API; this encoding change requires no new proof, public
+parameters, or keys.
 
 ## Signing messages and serialization
 
@@ -113,7 +114,7 @@ rotations. Only the last rotation prints a size report: one row per named type o
 struct, with separate enum variants where their sizes differ. This includes public
 parameters, proving and verifying keys, and signing payloads and transport messages.
 Shared parameters and keys are generated once. A separate table reports the raw
-proof and compressed verification-key payload sizes exposed by the API as `Vec<u8>`.
+proof and verification-key payload sizes exposed by the API as `Vec<u8>`.
 Both size tables use decimal KB (`1 KB = 1000 bytes`) with three decimal places.
 
 The final timing table lists calls, total milliseconds, and mean milliseconds for

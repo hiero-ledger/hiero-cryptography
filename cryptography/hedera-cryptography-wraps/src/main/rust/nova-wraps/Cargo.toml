@@ -8,9 +8,8 @@ license = "MIT OR Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Resolved from crates.io. `io` is what pulls in the powers-of-tau loader that
-# `WRAPS::setup_public_params` needs; the rest of the default feature set is not
-# used here.
+# Resolved from crates.io. `io` provides the powers-of-tau loader that
+# `WRAPS::setup_public_params` needs.
 nova-snark = { version = "0.76", default-features = false, features = ["io"] }
 
 ff = { version = "0.13.0", features = ["derive"] }
@@ -38,12 +37,11 @@ ff = { version = "0.13.0", features = ["derive"] }
 # `msm_best`, whose parallelism comes from `plonky2_maybe_rayon/parallel`. So the print
 # cannot be turned off with features.
 #
-# `halo2curves/` is upstream at the `v0.9.0` tag, vendored, with that one hunk removed
-# and a `[lints.rust]` block added to its manifest — a path source does not get
-# `--cap-lints=allow` the way a registry one does, so the crate's 13 pre-existing
-# warnings would otherwise replay on every build here. Nothing else differs; see the
-# README for the exact delta. The patch applies to the whole graph, so `nova-snark`
-# picks it up too. Drop this section, and the directory, once the print is gone upstream.
+# `halo2curves/` vendors upstream `v0.9.0` with the print removed and pre-existing
+# warnings allowed for this path dependency. Its `asm` feature enables only `std`,
+# so Nova's explicit x86_64 `asm` request uses portable Rust field arithmetic.
+# The obsolete assembly build guard is also removed. See README for the full delta.
+# This patch applies throughout the dependency graph, including crates.io Nova.
 [patch.crates-io]
 halo2curves = { path = "halo2curves" }
 

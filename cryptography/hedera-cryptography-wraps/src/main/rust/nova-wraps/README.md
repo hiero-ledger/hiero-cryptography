@@ -212,9 +212,8 @@ it whenever a G2 point is parsed, so loading the SRS and reading a verifier key 
 spray `true`/`false` down stdout. It is gated on halo2curves' `std` feature alone, which
 `nova-snark` cannot give up, so features cannot turn it off.
 
-So `halo2curves/` is a vendored copy of upstream at the `v0.9.0` tag, wired in through
-`[patch.crates-io]`. It is third-party code, not ours, and differs from the tag in
-exactly two places:
+`halo2curves/` is a vendored copy of upstream at the `v0.9.0` tag, wired in through
+`[patch.crates-io]`. Nova itself comes from crates.io. The Halo fork has these changes:
 
 1. `src/bn256/curve.rs` — the two offending lines are gone from `exp_by_x`:
 
@@ -230,9 +229,33 @@ exactly two places:
    source does not get `--cap-lints=allow` the way a registry one does, so the crate's
    13 pre-existing warnings would otherwise replay on every build here.
 
-The patch applies to the whole graph, so `nova-snark` picks it up too. To rebase onto a
-newer upstream, re-vendor the tag and reapply (1); to retire it, delete the directory
-and the `[patch.crates-io]` section once the print is gone upstream.
+3. `Cargo.toml` — `asm = ["std"]` keeps the feature name that Nova requests on
+   x86_64, but no longer forwards it to `halo2derive/asm`. Halo therefore generates
+   portable Rust field arithmetic, without its assembly backend's ADX/BMI2 CPU
+   requirement. The same backend is selected for Linux and macOS (x86_64 and
+   AArch64), and Windows (x86_64).
+
+4. `build.rs` — the obsolete assembly architecture check is removed. It checked
+   the build host rather than the compilation target, which would otherwise reject
+   an AArch64-hosted build for x86_64 even with the assembly backend disabled.
+   The optional `bn256-table` generation remains unchanged.
+
+The patch applies to the whole graph, so `nova-snark` picks it up too. If WRAPS is
+built inside another Cargo workspace, put the Halo patch in that workspace's root
+manifest; Cargo only applies patches from the root.
+
+When updating dependencies, verify that `halo2derive/asm` remains absent from the
+resolved graph on every supported target. `halo2curves/asm` can remain enabled on
+x86_64 because it is now a compatibility feature that only enables `std`. For example:
+
+```bash
+cargo tree --target x86_64-unknown-linux-gnu -e features -i halo2derive
+```
+
+To rebase onto a newer upstream, reapply the print fix and portable-backend changes,
+and reassess whether the lint allowances are still needed. Retire the directory and
+its `[patch.crates-io]` entry only when upstream removes the unwanted print and the
+resolved dependencies select portable Halo arithmetic on all supported targets.
 
 ## Hashes
 

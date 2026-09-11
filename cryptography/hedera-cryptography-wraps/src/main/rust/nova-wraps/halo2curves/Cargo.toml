@@ -11,8 +11,8 @@ rust-version = "1.74.0"
 
 # Consumed as a `[patch.crates-io]` path dependency, which means cargo does not pass
 # `--cap-lints=allow` the way it does for a registry source, and 13 pre-existing upstream
-# warnings replay on every downstream build. None of them are ours. Capping them here
-# keeps the code patch on this branch to the single hunk in `src/bn256/curve.rs`.
+# warnings replay on every downstream build. Allow them here without changing the
+# upstream code that produces them.
 [lints.rust]
 dead_code = "allow"
 unused = "allow"
@@ -66,7 +66,9 @@ serde_arrays = { version = "0.2.0", optional = true }
 
 [features]
 default = ["bits"]
-asm = ["halo2derive/asm", "std"]
+# Compatibility with Nova's explicit x86_64 request. Keep portable field arithmetic
+# by leaving halo2derive/asm disabled, while preserving the std functionality.
+asm = ["std"]
 bits = ["ff/bits"]
 bn256-table = []
 derive_serde = ["serde/derive", "serde_arrays", "hex"]

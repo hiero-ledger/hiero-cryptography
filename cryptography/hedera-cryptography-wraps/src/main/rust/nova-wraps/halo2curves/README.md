@@ -20,7 +20,7 @@ The implementations were originally ported from [matterlabs/pairing](https://git
 ## Controlling parallelism
 
 `halo2curves` currently uses [rayon](https://github.com/rayon-rs/rayon) for parallel
-computation. 
+computation.
 
 The `RAYON_NUM_THREADS` environment variable can be used to set the number of
 threads.
@@ -28,7 +28,7 @@ threads.
 When compiling to WASM-targets, notice that since version `1.7`, `rayon` will fallback automatically (with no need to handle features) to require `getrandom` in order to be able to work.
 For more info related to WASM-compilation.
 
-See: [Rayon: Usage with WebAssembly](https://github.com/rayon-rs/rayon#usage-with-webassembly) for more info.  
+See: [Rayon: Usage with WebAssembly](https://github.com/rayon-rs/rayon#usage-with-webassembly) for more info.
 
 ## Benchmarks
 
@@ -43,7 +43,6 @@ or with assembly optimizations:
 ```
 $ cargo test --profile bench test_field --features asm -- --nocapture
 ```
-
 
 ## Additional Features
 

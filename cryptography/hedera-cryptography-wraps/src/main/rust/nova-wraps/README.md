@@ -35,10 +35,10 @@ internal implementation details, outside the public API.
 
 ## Layout
 
-| | |
-|---|---|
-| `src/lib.rs` | the whole library: Schnorr over Grumpkin, the three-round multisignature, address books, the step circuit, and the `WRAPS` entry points |
-| `examples/demo.rs` | ten rotations, including serialization round trips and byte sizes for WRAPS inputs and outputs |
+|                     |                                                                                                                                                             |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `src/lib.rs`        | the whole library: Schnorr over Grumpkin, the three-round multisignature, address books, the step circuit, and the `WRAPS` entry points                     |
+| `examples/demo.rs`  | ten rotations, including serialization round trips and byte sizes for WRAPS inputs and outputs                                                              |
 | `examples/stats.rs` | three linked rotations signed by 2-of-3 committees, with serialization checks throughout and final tables of individual type sizes and WRAPS method timings |
 
 The demo uses the library's shared `encode` and `decode` helpers and feeds decoded
@@ -126,10 +126,10 @@ timing entry.
 
 Each signing round has a distinct serializable payload:
 
-| Type | Field |
-|---|---|
-| `MultisigRound1` | `nonce_commitment: [u8; 32]` |
-| `MultisigRound2<E>` | `nonce_point: E::GE` |
+|        Type         |               Field               |
+|---------------------|-----------------------------------|
+| `MultisigRound1`    | `nonce_commitment: [u8; 32]`      |
+| `MultisigRound2<E>` | `nonce_point: E::GE`              |
 | `MultisigRound3<E>` | `partial_signature: Signature<E>` |
 
 `SigningProtocolMessage` is an alias for `Vec<u8>`. Each of the three rounds returns
@@ -224,17 +224,14 @@ spray `true`/`false` down stdout. It is gated on halo2curves' `std` feature alon
    -
             acc = acc.double();
    ```
-
 2. `Cargo.toml` — a `[lints.rust]` block allowing `dead_code` and `unused`. A path
    source does not get `--cap-lints=allow` the way a registry one does, so the crate's
    13 pre-existing warnings would otherwise replay on every build here.
-
 3. `Cargo.toml` — `asm = ["std"]` keeps the feature name that Nova requests on
    x86_64, but no longer forwards it to `halo2derive/asm`. Halo therefore generates
    portable Rust field arithmetic, without its assembly backend's ADX/BMI2 CPU
    requirement. The same backend is selected for Linux and macOS (x86_64 and
    AArch64), and Windows (x86_64).
-
 4. `build.rs` — the obsolete assembly architecture check is removed. It checked
    the build host rather than the compilation target, which would otherwise reject
    an AArch64-hosted build for x86_64 even with the assembly backend disabled.

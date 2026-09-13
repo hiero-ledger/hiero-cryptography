@@ -1,4 +1,4 @@
-//! End-to-end demonstration of the [`wraps`] library: a genesis committee rotating
+//! End-to-end demonstration of the [`novawraps`] library: a genesis committee rotating
 //! itself, then nine further rotations, each authorised by a weighted Schnorr
 //! multisignature and folded into one Nova proof.
 //!
@@ -12,10 +12,10 @@
 //! `WRAPS_PTAU_DIR` at a directory holding them:
 //!
 //! ```bash
-//! WRAPS_PTAU_DIR=../Nova/params cargo run --release --example demo
+//! WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example demo
 //! ```
 use serde::{de::DeserializeOwned, Serialize};
-use wraps::{
+use novawraps::{
   decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
   SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
   SigningProtocolPhase, E2, ENTROPY_SIZE, MAX_AB_SIZE, WRAPS,

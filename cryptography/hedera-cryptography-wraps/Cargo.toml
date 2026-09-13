@@ -9,6 +9,9 @@ resolver = "2"
 
 
 [patch.crates-io]
+# Use Nova WRAPS' vendored print fix and portable field arithmetic.
+halo2curves = { path = "src/main/rust/nova-wraps/halo2curves" }
+
 # Update ark-groth16 to latest git version
 ark-groth16 = { path = "src/main/rust/groth16" }
 

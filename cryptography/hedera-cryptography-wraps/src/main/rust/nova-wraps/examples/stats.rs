@@ -12,7 +12,7 @@
 //!
 //! Needs power-15 or larger powers-of-tau files under params/, or WRAPS_PTAU_DIR:
 //! ```bash
-//! cargo run --release --example stats
+//! cargo run --release -p novawraps --example stats
 //! ```
 
 use rand::Rng;
@@ -22,7 +22,7 @@ use std::{
   path::PathBuf,
   time::{Duration, Instant},
 };
-use wraps::{
+use novawraps::{
   decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
   SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
   SigningProtocolPhase, E2, ENTROPY_SIZE, WRAPS,

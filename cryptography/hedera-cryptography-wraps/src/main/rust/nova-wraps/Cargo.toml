@@ -41,9 +41,8 @@ ff = { version = "0.13.0", features = ["derive"] }
 # warnings allowed for this path dependency. Its `asm` feature enables only `std`,
 # so Nova's explicit x86_64 `asm` request uses portable Rust field arithmetic.
 # The obsolete assembly build guard is also removed. See README for the full delta.
-# This patch applies throughout the dependency graph, including crates.io Nova.
-[patch.crates-io]
-halo2curves = { path = "halo2curves" }
+# The workspace root declares the halo2curves path patch, so it also applies to
+# crates.io Nova. Cargo ignores patches declared in workspace member manifests.
 
 [profile.bench]
 opt-level = 3

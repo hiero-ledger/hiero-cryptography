@@ -1,4 +1,4 @@
-# wraps
+# novawraps
 
 Address-book rotation attested by a weighted Schnorr multisignature, folded with
 [Nova](https://github.com/microsoft/Nova).
@@ -57,7 +57,7 @@ fallback. Put pruned `ppot_pruned_XX.ptau` files under `params/`, or point
 `WRAPS_PTAU_DIR` at a directory holding them. The circuit needs **power 15** or above.
 
 ```bash
-WRAPS_PTAU_DIR=../Nova/params cargo run --release --example demo
+WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example demo
 ```
 
 ## Public parameters and keys
@@ -67,7 +67,7 @@ do not contain public parameters or wrap them in `Arc`. Generate the parameters 
 and borrow them when deriving keys or working with a running proof:
 
 ```rust
-use wraps::{PublicParams, ProverKey, VerifierKey, WRAPS};
+use novawraps::{PublicParams, ProverKey, VerifierKey, WRAPS};
 
 let pp: PublicParams = WRAPS::setup_public_params(&ptau_dir)?;
 let pk: ProverKey = WRAPS::setup_prover(&pp)?;
@@ -99,14 +99,14 @@ two introduce fresh successor books. Each step extends the running proof and ver
 both the running and compressed proofs against the original genesis hash:
 
 ```bash
-cargo run --release --example stats
+cargo run --release -p novawraps --example stats
 ```
 
 It requires the same powers-of-tau files as the demo, under `params/` or the directory
 specified by `WRAPS_PTAU_DIR`. For example:
 
 ```bash
-WRAPS_PTAU_DIR=../Nova/params cargo run --release --example stats
+WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example stats
 ```
 
 It checks serialization round trips with `encode` and `decode` throughout all three
@@ -143,7 +143,7 @@ The typed payloads and `RoundMessage<E>` remain public and serializable for insp
 For example, given the result of a round-1 call:
 
 ```rust
-use wraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
+use novawraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
 
 let SigningProtocolObject::ProtocolMessage(bytes) = round1_result else {
     panic!("round 1 must return a broadcast message");
@@ -213,7 +213,8 @@ spray `true`/`false` down stdout. It is gated on halo2curves' `std` feature alon
 `nova-snark` cannot give up, so features cannot turn it off.
 
 `halo2curves/` is a vendored copy of upstream at the `v0.9.0` tag, wired in through
-`[patch.crates-io]`. Nova itself comes from crates.io. The Halo fork has these changes:
+`[patch.crates-io]` in the workspace root `Cargo.toml`. Nova itself comes from crates.io.
+The Halo fork has these changes:
 
 1. `src/bn256/curve.rs` — the two offending lines are gone from `exp_by_x`:
 
@@ -237,9 +238,17 @@ spray `true`/`false` down stdout. It is gated on halo2curves' `std` feature alon
    an AArch64-hosted build for x86_64 even with the assembly backend disabled.
    The optional `bn256-table` generation remains unchanged.
 
-The patch applies to the whole graph, so `nova-snark` picks it up too. If WRAPS is
-built inside another Cargo workspace, put the Halo patch in that workspace's root
-manifest; Cargo only applies patches from the root.
+The patch applies to the whole graph, so `nova-snark` picks it up too. The workspace
+root manifest contains:
+
+```toml
+[patch.crates-io]
+halo2curves = { path = "src/main/rust/nova-wraps/halo2curves" }
+```
+
+Cargo only applies patches from the workspace root. If this crate is moved into
+another workspace or built standalone, declare the patch in that build's root
+manifest and adjust the path relative to that manifest.
 
 When updating dependencies, verify that `halo2derive/asm` remains absent from the
 resolved graph on every supported target. `halo2curves/asm` can remain enabled on
@@ -319,7 +328,7 @@ repeated sentinel keys at any `u64` weight: there is no sum that weight can reac
 ## Tests
 
 ```bash
-WRAPS_PTAU_DIR=../Nova/params cargo test --release
+WRAPS_PTAU_DIR=./params cargo test --release -p novawraps
 ```
 
 Everything runs by default. The end-to-end simulations perform a full trusted setup and

@@ -2,24 +2,26 @@
 //! itself, then nine further rotations, each authorised by a weighted Schnorr
 //! multisignature and folded into one Nova proof.
 //!
-//! Values cross a bincode serialization/deserialization boundary before use, with
-//! byte sizes printed for successful return values and function arguments. Shared
-//! parameters and keys are round-tripped once; key generation and signing show one
-//! representative member per book/phase. Only sizes, never key or seed bytes, are
-//! printed. Proof/key payload sizes are separate from their demo transport envelopes.
+//! Serializable values cross a bincode boundary before use, with byte sizes printed
+//! for successful return values and function arguments. Public parameters and compact
+//! verification-key bytes are round-tripped once. A compressed verifier is prepared
+//! once from the public parameters; uncompressed verification uses those parameters
+//! directly. Compact export is measured separately from verifier setup. Key generation
+//! and signing show one representative member per book/phase. Only sizes, never key
+//! or seed bytes, are printed. Payload sizes are separate from demo transport envelopes.
 //!
-//! Needs powers-of-tau files. Put `ppot_pruned_XX.ptau` under `params/`, or point
-//! `WRAPS_PTAU_DIR` at a directory holding them:
+//! Needs power-20 or larger powers-of-tau files. Put `ppot_pruned_XX.ptau` under
+//! `params/`, or point `WRAPS_PTAU_DIR` at a directory holding them:
 //!
 //! ```bash
 //! WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example demo
 //! ```
-use serde::{de::DeserializeOwned, Serialize};
 use novawraps::{
   decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
   SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
   SigningProtocolPhase, E2, ENTROPY_SIZE, MAX_AB_SIZE, WRAPS,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 fn main() {
   use std::time::Instant;
@@ -30,41 +32,35 @@ fn main() {
   println!("=========================================================");
 
   let num_steps = 10;
-  println!("Sizes below use bincode legacy; return sizes measure the successful payload.");
-  let dir = round_trip("setup_public_params input: ptau_dir", ptau_dir());
-  println!("Producing public parameters from {}...", dir.display());
-  // Generate public parameters once, then borrow them to derive each party's key.
+  println!("Serializable values use bincode legacy; compact keys have a versioned encoding.");
+  let dir = round_trip("load_public_params input: ptau_dir", ptau_dir());
+  println!("Loading public parameters from {}...", dir.display());
+  // The same parameters support proving and independent running-proof verification.
   let start = Instant::now();
-  let pp = WRAPS::setup_public_params(&dir).expect("powers-of-tau setup");
-  println!("WRAPS::setup_public_params, took {:?}", start.elapsed());
+  let pp = WRAPS::load_public_params(&dir).expect("load powers-of-tau parameters");
+  println!("WRAPS::load_public_params, took {:?}", start.elapsed());
   let pp = round_trip(
-    "setup_public_params return: PublicParams (reused by setup/proving/verification)",
+    "load_public_params return: PublicParams (reused by proving and verification)",
     pp,
   );
   let start = Instant::now();
-  let wraps_pk = WRAPS::setup_prover(&pp).expect("prover key setup");
-  println!("WRAPS::setup_prover, took {:?}", start.elapsed());
-  let wraps_pk = round_trip("setup_prover return / construct input: ProverKey", wraps_pk);
+  let vk_bytes = WRAPS::get_compressed_verification_key(&pp).expect("compact verifier key");
+  println!(
+    "WRAPS::get_compressed_verification_key, took {:?}",
+    start.elapsed()
+  );
+  let vk_bytes = round_trip("get_compressed_verification_key return: Vec<u8>", vk_bytes);
+  println!("Compact verification key payload: {} bytes", vk_bytes.len());
+  // Prepare from public parameters once; retain the verifier across rotations.
   let start = Instant::now();
-  let wraps_vk = WRAPS::setup_verifier(&pp).expect("verifier key setup");
-  println!("WRAPS::setup_verifier, took {:?}", start.elapsed());
-  let wraps_vk = round_trip(
-    "setup_verifier return / construct and key-encoding input: VerifierKey",
-    wraps_vk,
+  let wraps_vk = WRAPS::setup_compressed_verifier(&pp).expect("compressed verifier setup");
+  println!(
+    "WRAPS::setup_compressed_verifier, took {:?}",
+    start.elapsed()
   );
   let (primary, secondary) = pp.num_constraints();
   println!("Number of constraints per step (primary circuit): {primary}");
   println!("Number of constraints per step (secondary circuit): {secondary}");
-
-  let vk_bytes = WRAPS::get_compressed_verification_key_bytes(&wraps_vk).unwrap();
-  println!(
-    "Verification key payload: {} bytes (bincode)",
-    vk_bytes.len()
-  );
-  let vk_bytes = round_trip(
-    "get_compressed_verification_key_bytes return: Vec<u8>",
-    vk_bytes,
-  );
 
   let (genesis_ab, genesis_keys) = random_address_book();
   println!(
@@ -164,9 +160,10 @@ fn main() {
       WRAPS::verify_signature(&signing_book, &signed_message, &signature).unwrap(),
     ));
 
-    // The large shared pp/pk/vk inputs were decoded once above and are reused here.
+    // Parameters were decoded once. Construction derives keys and checks both
+    // proof forms internally; the prepared compressed verifier is independent.
     let (genesis_hash, prev_ab, next_ab, prev_proof, proof_hints_vk, proof_signature) = round_trip(
-      "construct_wraps_proof inputs (excluding shared pp/pk/vk)",
+      "construct_wraps_proof inputs (excluding retained public parameters)",
       (
         ab_genesis_hash,
         prev.0.clone(),
@@ -180,8 +177,6 @@ fn main() {
     let start = Instant::now();
     let (uncompressed, compressed) = WRAPS::construct_wraps_proof(
       &pp,
-      &wraps_pk,
-      &wraps_vk,
       &genesis_hash,
       &prev_ab,
       &next_ab,
@@ -190,7 +185,10 @@ fn main() {
       &proof_signature,
     )
     .expect("the rotation is authorised");
-    println!("  construct_wraps_proof, took {:?}", start.elapsed());
+    println!(
+      "  construct_wraps_proof (including key derivation and both proof checks), took {:?}",
+      start.elapsed()
+    );
     println!(
       "  proof payloads: running {} bytes (bincode), compressed {} bytes (bincode)",
       uncompressed.len(),
@@ -201,24 +199,15 @@ fn main() {
       (uncompressed, compressed),
     );
 
-    let (verifier_key, proof, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_compressed_wraps_proof inputs: (vk bytes, proof bytes, genesis hash, hints vk)",
-      (
-        vk_bytes.clone(),
-        compressed,
-        ab_genesis_hash,
-        hints_vk.clone(),
-      ),
+    let (proof, genesis_hash, verifier_hints_vk) = round_trip(
+      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); prepared key reused",
+      (compressed, ab_genesis_hash, hints_vk.clone()),
     );
 
     let start = Instant::now();
-    let verified = WRAPS::verify_compressed_wraps_proof(
-      &verifier_key,
-      &proof,
-      &genesis_hash,
-      &verifier_hints_vk,
-    )
-    .unwrap();
+    let verified =
+      WRAPS::verify_compressed_wraps_proof(&wraps_vk, &proof, &genesis_hash, &verifier_hints_vk)
+        .unwrap();
     println!(
       "  verify_compressed_wraps_proof: {verified:?}, took {:?}",
       start.elapsed()
@@ -228,11 +217,9 @@ fn main() {
       verified
     ));
 
-    // The same chain, checked from the running proof instead. Cheaper, but it needs the
-    // folding parameters and megabytes of proof, so it is for a party that already has
-    // both rather than for a remote verifier.
+    // Check the same chain from its running proof using the retained parameters.
     let (uncompressed, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_uncompressed_wraps_proof inputs (excluding shared pp)",
+      "verify_uncompressed_wraps_proof inputs (excluding retained public parameters)",
       (uncompressed, ab_genesis_hash, hints_vk.clone()),
     );
     let start = Instant::now();
@@ -258,8 +245,6 @@ fn main() {
     );
     let rejected = WRAPS::construct_wraps_proof(
       &pp,
-      &wraps_pk,
-      &wraps_vk,
       &ab_genesis_hash,
       &prev.0,
       &next.0,
@@ -540,8 +525,8 @@ fn threshold_sign(
 
 /// The directory holding pruned powers-of-tau files, overridable for testing.
 ///
-/// HyperKZG on the primary curve needs a universal setup, so there is no transparent
-/// fallback here. Drop `ppot_pruned_XX.ptau` files into `./params` — or point
+/// Mercury on the primary curve uses a KZG universal setup. Put power-20 or larger
+/// `ppot_pruned_XX.ptau` files into `./params`, or point
 /// `WRAPS_PTAU_DIR` at a directory holding them. See the "Powers of tau" section of
 /// the README.
 fn ptau_dir() -> std::path::PathBuf {

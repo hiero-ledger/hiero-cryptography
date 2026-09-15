@@ -1,31 +1,34 @@
 //! Three linked rotations: a genesis self-rotation, then two new committees.
 //! Two of each outgoing book's three equal-weight members sign its successor.
 //!
-//! All inputs, outputs, and broadcasts are round-tripped with the library's shared
-//! encode/decode helpers, and both proof forms are verified after every rotation.
+//! Serializable inputs, outputs, and broadcasts are round-tripped with the shared
+//! encode/decode helpers. A compressed verifier is prepared from the public parameters
+//! and retained. Compact key export is measured and round-tripped independently.
+//! Uncompressed verification uses the retained public parameters directly.
 //! The final rotation prints one compact table of individual named types, with
-//! separate rows for enum variants whose encodings differ. Shared setup artifacts
-//! are included. Raw proof/key payload sizes are reported in a separate table.
-//! Sizes use decimal KB (1 KB = 1,000 bytes). A timing table covers setup calls and
-//! the final rotation, excluding example serialization and reporting overhead.
+//! separate rows for enum variants whose encodings differ. Setup artifacts
+//! are included. Raw proof/compact-key payload sizes are reported in a separate table.
+//! Sizes use decimal KB (1 KB = 1,000 bytes). A timing table covers initialization
+//! and the final rotation, excluding example serialization and reporting overhead.
+//! Proof construction includes internal key derivation and checking both proof forms.
 //! Serialization checks are silent; secret values are never printed.
 //!
-//! Needs power-15 or larger powers-of-tau files under params/, or WRAPS_PTAU_DIR:
+//! Needs power-20 or larger powers-of-tau files under params/, or WRAPS_PTAU_DIR:
 //! ```bash
 //! cargo run --release -p novawraps --example stats
 //! ```
 
+use novawraps::{
+  decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
+  SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
+  SigningProtocolPhase, E2, ENTROPY_SIZE, WRAPS,
+};
 use rand::Rng;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
   collections::BTreeMap,
   path::PathBuf,
   time::{Duration, Instant},
-};
-use novawraps::{
-  decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
-  SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
-  SigningProtocolPhase, E2, ENTROPY_SIZE, WRAPS,
 };
 
 fn main() {
@@ -36,7 +39,7 @@ fn main() {
 
   // Check setup serialization now; defer its size report to the final rotation.
   let dir = round_trip(
-    "setup_public_params input: ptau_dir",
+    "load_public_params input: ptau_dir",
     &std::env::var_os("WRAPS_PTAU_DIR")
       .map(PathBuf::from)
       .unwrap_or_else(|| PathBuf::from("params")),
@@ -45,31 +48,26 @@ fn main() {
   let pp = round_trip(
     "PublicParams",
     &setup_timings
-      .measure("WRAPS::setup_public_params", || {
-        WRAPS::setup_public_params(&dir)
+      .measure("WRAPS::load_public_params", || {
+        WRAPS::load_public_params(&dir)
       })
-      .expect("powers-of-tau setup"),
-  );
-  let pk = round_trip(
-    "ProverKey",
-    &setup_timings
-      .measure("WRAPS::setup_prover", || WRAPS::setup_prover(&pp))
-      .expect("prover key setup"),
-  );
-  let vk = round_trip(
-    "VerifierKey",
-    &setup_timings
-      .measure("WRAPS::setup_verifier", || WRAPS::setup_verifier(&pp))
-      .expect("verifier key setup"),
+      .expect("load powers-of-tau parameters"),
   );
   let vk_bytes = round_trip(
-    "verification key: Vec<u8>",
+    "compact verification key: Vec<u8>",
     &setup_timings
-      .measure("WRAPS::get_compressed_verification_key_bytes", || {
-        WRAPS::get_compressed_verification_key_bytes(&vk)
+      .measure("WRAPS::get_compressed_verification_key", || {
+        WRAPS::get_compressed_verification_key(&pp)
       })
-      .expect("encode verifier key"),
+      .expect("compact verifier key"),
   );
+  // Prepare independently from the retained public parameters. The resulting
+  // verifier stays local and is reused across rotations.
+  let vk = setup_timings
+    .measure("WRAPS::setup_compressed_verifier", || {
+      WRAPS::setup_compressed_verifier(&pp)
+    })
+    .expect("compressed verifier setup");
   let mut quiet_timings = TimingReport::new(false);
   let mut previous = random_address_book(&mut quiet_timings);
   let genesis_hash = round_trip(
@@ -88,9 +86,7 @@ fn main() {
     let mut timings = TimingReport::new(rotation + 1 == ROTATIONS);
     let start = Instant::now();
     report.size("PublicParams", &pp);
-    report.size("ProverKey", &pk);
-    report.size("VerifierKey", &vk);
-    report.artifact("Verification key (bincode)", vk_bytes.len());
+    report.artifact("Compact verification key (versioned)", vk_bytes.len());
     report.size("AddressBookHash<E2>", &genesis_hash);
     report_address_book_types(&mut report, &previous.0, &previous.1);
 
@@ -167,15 +163,13 @@ fn main() {
       &running_proof.take(),
     );
     let (proof_genesis, prev_book, next_book, previous_proof, proof_hints, signature) = round_trip(
-      "construct_wraps_proof inputs: (genesis hash, prev book, next book, prev proof, hints vk, multisignature); pp/pk/vk reused",
+      "construct_wraps_proof inputs: (genesis hash, prev book, next book, prev proof, hints vk, multisignature); public parameters reused",
       &(genesis_hash, book, next_book, previous_proof, hints_vk, multisignature),
     );
     let proofs = timings
       .measure("WRAPS::construct_wraps_proof", || {
         WRAPS::construct_wraps_proof(
           &pp,
-          &pk,
-          &vk,
           &proof_genesis,
           &prev_book,
           &next_book,
@@ -194,26 +188,21 @@ fn main() {
     let running = round_trip("running proof: Vec<u8>", &running);
     let compressed = round_trip("compressed proof: Vec<u8>", &compressed);
 
-    let (verifier_key, compressed, proof_genesis, proof_hints) = round_trip(
-      "verify_compressed_wraps_proof inputs: (vk bytes, proof bytes, genesis hash, hints vk)",
-      &(vk_bytes.clone(), compressed, proof_genesis, proof_hints),
+    let (compressed, proof_genesis, proof_hints) = round_trip(
+      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); prepared key reused",
+      &(compressed, proof_genesis, proof_hints),
     );
     assert!(round_trip(
       "verify_compressed_wraps_proof return: bool",
       &timings
         .measure("WRAPS::verify_compressed_wraps_proof", || {
-          WRAPS::verify_compressed_wraps_proof(
-            &verifier_key,
-            &compressed,
-            &proof_genesis,
-            &proof_hints,
-          )
+          WRAPS::verify_compressed_wraps_proof(&vk, &compressed, &proof_genesis, &proof_hints)
         })
         .expect("valid compressed proof inputs"),
     ));
 
     let (running, proof_genesis, proof_hints) = round_trip(
-      "verify_uncompressed_wraps_proof inputs: (running proof, genesis hash, hints vk); pp reused",
+      "verify_uncompressed_wraps_proof inputs: (running proof, genesis hash, hints vk); public parameters reused",
       &(running, proof_genesis, proof_hints),
     );
     assert!(round_trip(
@@ -593,8 +582,9 @@ impl TimingReport {
         "duplicate timing: {method}"
       );
     }
-    println!("\nWRAPS method timings (setup once + rotation 3; direct calls only):");
+    println!("\nWRAPS method timings (initialization + rotation 3; direct calls only):");
     println!("Includes internal library work; excludes example serialization and reporting.");
+    println!("construct_wraps_proof includes key derivation and checking both proof forms.");
     println!(
       "{:<46} {:>7} {:>14} {:>14}",
       "Method", "Calls", "Total ms", "Mean ms"

@@ -10,6 +10,7 @@ use crate::{
     SchnorrPublicKey, SchnorrResponse, SchnorrSecretKey, Signature,
   },
   utils::{decode, encode, encode_point, expand_seed, pad_bitvector, BitVector},
+  verification_key,
 };
 use ff::Field;
 use nova_snark::{
@@ -22,10 +23,10 @@ use std::sync::Arc;
 
 pub type E1 = Bn256EngineKZG;
 pub type E2 = GrumpkinEngine;
-type EE1 = nova_snark::provider::hyperkzg::EvaluationEngine<E1>;
-type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<E2>;
-type S1 = nova_snark::spartan::snark::RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
-type S2 = nova_snark::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // non-preprocessing SNARK
+pub(crate) type EE1 = nova_snark::provider::mercury::EvaluationEngine<E1>;
+pub(crate) type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<E2>;
+pub(crate) type S1 = nova_snark::spartan::ppsnark::RelaxedR1CSSNARK<E1, EE1>;
+pub(crate) type S2 = nova_snark::spartan::ppsnark::RelaxedR1CSSNARK<E2, EE2>;
 
 /// The circuit field: Grumpkin's base field, which is BN254's scalar field.
 pub type Base = <E2 as Engine>::Base;
@@ -315,14 +316,26 @@ pub enum SigningProtocolObject<E: Engine> {
 
 type C = RotationCircuit<E2>;
 
-/// Owned Nova folding parameters for the rotation circuit.
+/// Owned Nova parameters for proving and verifying uncompressed rotation proofs.
 pub type PublicParams = nova::PublicParams<E1, E2, C>;
 
-/// Owned Spartan prover key, separate from the folding parameters.
-pub type ProverKey = nova::ProverKey<E1, E2, C, S1, S2>;
+pub(crate) type NovaVerifierKey = nova::VerifierKey<E1, E2, C, S1, S2>;
 
-/// Owned Spartan verifier key, sufficient for compressed-proof verification.
-pub type VerifierKey = nova::VerifierKey<E1, E2, C, S1, S2>;
+/// An opaque, reusable verifier key for compressed WRAPS proofs.
+///
+/// Derive this from public parameters with [`WRAPS::setup_compressed_verifier`].
+/// It owns its verification material and can outlive the parameters. Reuse it
+/// across proof checks to retain Nova's cached verifier-key digests.
+pub struct CompressedVerifyingKey {
+  pub(crate) inner: NovaVerifierKey,
+}
+
+impl std::fmt::Debug for CompressedVerifyingKey {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("CompressedVerifyingKey")
+      .finish_non_exhaustive()
+  }
+}
 
 /// A compressed proof together with the statement it speaks for.
 ///
@@ -653,35 +666,41 @@ impl WRAPS {
     ])
   }
 
-  /// Builds the folding parameters used to derive prover and verifier keys.
-  pub fn setup_public_params(ptau_dir: &std::path::Path) -> Result<PublicParams, WrapsError> {
+  /// Loads the powers-of-tau data and builds the rotation circuit's public parameters.
+  ///
+  /// Reuse these parameters for proof construction and uncompressed verification.
+  /// Proof construction derives its prover and compressed verifier keys internally.
+  pub fn load_public_params(ptau_dir: &std::path::Path) -> Result<PublicParams, WrapsError> {
     let pc = shared_constants();
     let circuit = C::dummy(&pc);
 
-    PublicParams::setup_with_ptau_dir(&circuit, &*S1::ck_floor(), &*S2::ck_floor(), ptau_dir)
+    nova::PublicParams::setup_with_ptau_dir(&circuit, &*S1::ck_floor(), &*S2::ck_floor(), ptau_dir)
       .map_err(|e| WrapsError::cryptography(format!("public parameter setup failed: {e}")))
   }
 
-  /// Derives an owned prover key from borrowed folding parameters.
-  pub fn setup_prover(pp: &PublicParams) -> Result<ProverKey, WrapsError> {
-    CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
-      .map(|(pk, _)| pk)
-      .map_err(|e| WrapsError::cryptography(format!("compressing SNARK setup failed: {e}")))
-  }
-
-  /// Derives an owned verifier key from borrowed folding parameters.
-  pub fn setup_verifier(pp: &PublicParams) -> Result<VerifierKey, WrapsError> {
-    CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
-      .map(|(_, vk)| vk)
-      .map_err(|e| WrapsError::cryptography(format!("compressing SNARK setup failed: {e}")))
-  }
-
-  /// Serializes the verifier key a standalone verifier needs using plain bincode.
+  /// Derives a compressed-proof verifier directly from trusted public parameters.
   ///
-  /// Only `vk` is emitted; `pp` stays with whoever ran the setup, since a verifier that
-  /// has the compressed proof never touches the folding parameters.
-  pub fn get_compressed_verification_key_bytes(vk: &VerifierKey) -> Result<Vec<u8>, WrapsError> {
-    encode(vk)
+  /// Uses Nova's setup with the constants and commitment keys already in `pp`.
+  /// Setup initializes the verifier-key digest caches. The returned key owns its
+  /// verification material; reuse it across proofs.
+  pub fn setup_compressed_verifier(
+    pp: &PublicParams,
+  ) -> Result<CompressedVerifyingKey, WrapsError> {
+    let (_, inner) = CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
+      .map_err(|e| WrapsError::cryptography(format!("compressed verifier setup failed: {e}")))?;
+    // Initialize WRAPS' hints-hash constants before the first verification.
+    let _ = shared_constants();
+    Ok(CompressedVerifyingKey { inner })
+  }
+
+  /// Exports the compact verification-key descriptor.
+  ///
+  /// This 778-byte, versioned descriptor includes application-specific values,
+  /// the ceremony-dependent PCS key, and small fixed secondary-key fields.
+  /// Poseidon constants and IPA generator arrays are omitted. This is an export
+  /// format; [`Self::setup_compressed_verifier`] takes public parameters directly.
+  pub fn get_compressed_verification_key(pp: &PublicParams) -> Result<Vec<u8>, WrapsError> {
+    verification_key::export(pp)
   }
 
   /// Folds one rotation into the chain and compresses the result.
@@ -693,11 +712,10 @@ impl WRAPS {
   /// Returns `(running proof, compressed proof)`. The first is fed back in as
   /// `prev_proof` next time; the second is what a verifier is handed. Both use
   /// [`encode`]; compression of the second proof is performed by Nova, without zlib.
-  #[allow(clippy::too_many_arguments)]
+  /// Each call derives the compression keys from `pp` and verifies both proofs
+  /// against the supplied genesis hash and hints key before returning them.
   pub fn construct_wraps_proof(
     pp: &PublicParams,
-    pk: &ProverKey,
-    vk: &VerifierKey,
     ab_genesis_hash: &AddressBookHash<E2>,
     prev_ab: &AddressBook<E2>,
     next_ab: &AddressBook<E2>,
@@ -796,12 +814,23 @@ impl WRAPS {
       .map_err(|e| WrapsError::cryptography(format!("proving the rotation failed: {e}")))?;
 
     running.num_steps = running.snark.num_steps();
-    running.zi = running
-      .snark
-      .verify(pp, running.num_steps, &running.z0)
-      .map_err(|e| WrapsError::cryptography(format!("the running proof does not verify: {e}")))?;
+    running.zi = running.snark.outputs().to_vec();
+    let uncompressed = encode(&running)?;
+    if !Self::verify_uncompressed_wraps_proof(
+      pp,
+      &uncompressed,
+      ab_genesis_hash,
+      hints_vk.as_ref(),
+    )? {
+      return Err(WrapsError::cryptography(
+        "the uncompressed proof just produced does not verify",
+      ));
+    }
 
-    let snark = CompressedSNARK::<_, _, _, S1, S2>::prove(pp, pk, &running.snark)
+    let (pk, inner) = CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
+      .map_err(|e| WrapsError::cryptography(format!("compressing SNARK setup failed: {e}")))?;
+    let vk = CompressedVerifyingKey { inner };
+    let snark = CompressedSNARK::<_, _, _, S1, S2>::prove(pp, &pk, &running.snark)
       .map_err(|e| WrapsError::cryptography(format!("compressing the proof failed: {e}")))?;
     let compressed = encode(&CompressedWrapsProof {
       num_steps: running.num_steps,
@@ -809,16 +838,9 @@ impl WRAPS {
       zi: running.zi.clone(),
       snark,
     })?;
-    let uncompressed = encode(&running)?;
 
     // Check what we are about to hand out, against the key a verifier would use.
-    let vk_bytes = Self::get_compressed_verification_key_bytes(vk)?;
-    if !Self::verify_compressed_wraps_proof(
-      &vk_bytes,
-      &compressed,
-      ab_genesis_hash,
-      hints_vk.as_ref(),
-    )? {
+    if !Self::verify_compressed_wraps_proof(&vk, &compressed, ab_genesis_hash, hints_vk.as_ref())? {
       return Err(WrapsError::cryptography(
         "the compressed proof just produced does not verify",
       ));
@@ -833,6 +855,7 @@ impl WRAPS {
   /// running proof is megabytes and carries full witnesses. Useful to a party that
   /// already holds the folding parameters and just wants to confirm a chain it was
   /// handed; a remote verifier should be given the compressed proof instead.
+  /// Borrows the same public parameters used for proof construction.
   pub fn verify_uncompressed_wraps_proof(
     pp: &PublicParams,
     running_proof: &Vec<u8>,
@@ -851,20 +874,20 @@ impl WRAPS {
     }
   }
 
-  /// Checks a compressed proof against a serialized verifier key.
+  /// Checks a compressed proof against a prepared verifier key.
   ///
-  /// The proof and verifier key both use plain bincode encoding.
+  /// Only the proof is decoded. Constants, generators, and the verifier-key
+  /// digests computed during setup are reused across calls.
   ///
   /// Beyond the SNARK itself this pins the two ends of the chain: it must start at
   /// `ab_genesis_hash` and must currently carry `hints_vk`. Without those a valid proof
   /// of some *other* chain would pass.
   pub fn verify_compressed_wraps_proof(
-    compressed_vk_serialized: &Vec<u8>,
+    vk: &CompressedVerifyingKey,
     proof_serialized: &Vec<u8>,
     ab_genesis_hash: &AddressBookHash<E2>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
-    let vk = decode::<VerifierKey>(compressed_vk_serialized)?;
     let proof = decode::<CompressedWrapsProof>(proof_serialized)?;
 
     if proof.z0.len() != 2 || proof.zi.len() != 2 {
@@ -876,7 +899,7 @@ impl WRAPS {
 
     // Nova returns the final state authenticated by the SNARK. It must agree with
     // the explicit `zi` used above to check the expected hints key.
-    match proof.snark.verify(&vk, proof.num_steps, &proof.z0) {
+    match proof.snark.verify(&vk.inner, proof.num_steps, &proof.z0) {
       Ok(zi) => Ok(genesis_ok && hints_ok && zi == proof.zi),
       Err(_) => Ok(false),
     }

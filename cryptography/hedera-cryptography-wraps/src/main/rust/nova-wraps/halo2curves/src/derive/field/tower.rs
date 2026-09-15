@@ -41,13 +41,9 @@ macro_rules! impl_tower2 {
             pub fn from_bytes(bytes: &[u8; $base::SIZE * 2]) -> CtOption<$field> {
                 let c0 = $base::from_bytes(bytes[0..$base::SIZE].try_into().unwrap());
                 let c1 = $base::from_bytes(bytes[$base::SIZE..$base::SIZE * 2].try_into().unwrap());
-                CtOption::new(
-                    $field {
-                        c0: c0.unwrap(),
-                        c1: c1.unwrap(),
-                    },
-                    c0.is_some() & c1.is_some(),
-                )
+                // A noncanonical component must return None, not panic while
+                // unwrapping the components before their validity is checked.
+                c0.and_then(|c0| c1.map(|c1| $field { c0, c1 }))
             }
 
             /// Converts an element of `$base` into a byte representation in
@@ -132,7 +128,7 @@ macro_rules! impl_tower2 {
                 let c1: <$base as PrimeField>::Repr = c1.into();
                 let c1 = $base::from_repr(c1);
 
-                CtOption::new($field::new(c0.unwrap(), c1.unwrap()), Choice::from(1))
+                c0.and_then(|c0| c1.map(|c1| $field { c0, c1 }))
             }
 
             fn to_repr(&self) -> Self::Repr {

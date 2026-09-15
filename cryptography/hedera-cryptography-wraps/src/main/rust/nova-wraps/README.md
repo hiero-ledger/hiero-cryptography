@@ -28,8 +28,9 @@ require regenerating public parameters, prover/verifier keys, and proofs; existi
 powers-of-tau files can be reused.
 
 Use `WRAPS` with the public address-book, signing, and key types.
-Serialized proofs, verifier keys, rotation messages, and signing-round messages use
-`Vec<u8>`.
+Proofs, compact verification keys, rotation messages, and signing-round messages use
+`Vec<u8>` for transport. Verifier setup derives a retained `CompressedVerifyingKey`
+from public parameters; verification borrows that prepared object.
 Padding, signing-subset selection, and the underlying cryptographic helpers are
 internal implementation details, outside the public API.
 
@@ -42,54 +43,96 @@ internal implementation details, outside the public API.
 | `examples/stats.rs` | three linked rotations signed by 2-of-3 committees, with serialization checks throughout and final tables of individual type sizes and WRAPS method timings |
 
 The demo uses the library's shared `encode` and `decode` helpers and feeds decoded
-values into signing, proof construction, and verification. It reports the shared
-parameters and keys once, one representative member's key generation and signing
-arguments per book/phase, and the complete round broadcasts as encoded `RoundMessage`
-bytes.
+values into signing, proof construction, and verification. The public parameters and
+compact verification-key bytes are round-tripped once. The parameters are reused
+for proving and running-proof verification; the prepared compressed verifier is
+retained for all rotations. It reports one representative member's key generation
+and signing arguments per book/phase, and the complete round broadcasts as encoded
+`RoundMessage` bytes.
 Reported return sizes cover successful payloads; raw proof and verifier-key sizes
 are printed separately from the surrounding bincode envelopes. Secret keys and seeds
 are measured without printing their contents.
 
 ## Powers of tau
 
-HyperKZG on the primary curve needs a universal setup, so there is no transparent
-fallback. Put pruned `ppot_pruned_XX.ptau` files under `params/`, or point
-`WRAPS_PTAU_DIR` at a directory holding them. The circuit needs **power 15** or above.
+Compression uses MicroSpartan on both curves, Mercury on BN254, and IPA on Grumpkin.
+Mercury uses a KZG universal setup. Put pruned `ppot_pruned_XX.ptau` files under
+`params/`, or point `WRAPS_PTAU_DIR` at a directory holding them. The current
+MicroSpartan setup needs **power 20** or above; the power-15 file in this crate's
+`params/` directory is insufficient.
 
 ```bash
-WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example demo
+WRAPS_PTAU_DIR=/Users/rohit/Research/Nova/params cargo run --release -p novawraps --example demo
 ```
 
 ## Public parameters and keys
 
-`PublicParams`, `ProverKey`, and `VerifierKey` are separate owned values. The key types
-do not contain public parameters or wrap them in `Arc`. Generate the parameters once
-and borrow them when deriving keys or working with a running proof:
+`load_public_params` loads powers-of-tau data and builds an owned Nova `PublicParams`
+value. Proof construction and uncompressed verification both borrow these parameters.
+Each construction call derives its own prover and compressed verifier keys and
+checks both returned proofs against the supplied genesis hash and hints key.
+Compressed-verifier setup also borrows the public parameters and derives its key
+directly through Nova. Once prepared, that key owns everything needed for compressed
+verification and does not retain a reference to the public parameters:
 
 ```rust
-use novawraps::{PublicParams, ProverKey, VerifierKey, WRAPS};
+use novawraps::{CompressedVerifyingKey, PublicParams, WRAPS};
 
-let pp: PublicParams = WRAPS::setup_public_params(&ptau_dir)?;
-let pk: ProverKey = WRAPS::setup_prover(&pp)?;
-let vk: VerifierKey = WRAPS::setup_verifier(&pp)?;
+let pp: PublicParams = WRAPS::load_public_params(&ptau_dir)?;
+let compact_vk: Vec<u8> = WRAPS::get_compressed_verification_key(&pp)?;
+
+// On a compressed verifier, prepare once and retain the key across proof checks.
+let compressed_vk: CompressedVerifyingKey = WRAPS::setup_compressed_verifier(&pp)?;
 
 let (running, compressed) = WRAPS::construct_wraps_proof(
-    &pp, &pk, &vk, &genesis_hash, &prev_ab, &next_ab,
+    &pp, &genesis_hash, &prev_ab, &next_ab,
     previous_running_proof, hints_vk, &multisignature,
 )?;
-let valid = WRAPS::verify_uncompressed_wraps_proof(&pp, &running, &genesis_hash, hints_vk)?;
-let vk_bytes = WRAPS::get_compressed_verification_key_bytes(&vk)?;
+let running_valid = WRAPS::verify_uncompressed_wraps_proof(
+    &pp, &running, &genesis_hash, hints_vk,
+)?;
+let compressed_valid = WRAPS::verify_compressed_wraps_proof(
+    &compressed_vk, &compressed, &genesis_hash, hints_vk,
+)?;
 ```
 
-Compressed verification uses only the serialized verifier key and proof, plus the
-expected genesis hash and hints verification key.
+The compact verification key is **778 bytes** for the current circuit and encoding.
+Of these, **288 bytes are application-specific**; the remaining bytes carry the
+format metadata, dimensions, and small fixed or KZG setup values needed for
+reconstruction. This is the transport size, not the prepared key's memory use.
+
+`setup_compressed_verifier(&pp)` uses Nova's setup directly, including the Poseidon
+constants and the secondary IPA basis of **131,072 message generators** already
+held in the parameters. It derives the compression keys and retains the verifier
+key. Keep the returned object and pass it by reference to repeated verification calls.
+`CompressedVerifyingKey` does not implement Serde. To prepare a verifier in another
+process, load or deserialize `PublicParams` there and call `setup_compressed_verifier`.
+Uncompressed verification uses `&PublicParams` directly; those parameters support
+`encode` and `decode`, with no separate verifier setup or wrapper.
+
+`get_compressed_verification_key(&pp)` remains available as a separate export.
+The crate has no compact-byte importer. The mirror structures and serialization
+logic in `verification_key.rs` are used only by that export, which checks that the
+omitted constants and IPA generators match the fixed defaults.
+
+The public API has no separate prover-key setup. `construct_wraps_proof` derives
+Nova's prover and compressed verifier keys together on every call, so its runtime
+includes that setup cost. Its internal compressed check uses the derived key
+directly, without exporting or importing the compact format.
 
 `CompressedWrapsProof` is Nova's compressed SNARK, serialized directly with `encode`
 using bincode. Its byte length is deterministic for a fixed circuit shape; there is
-no additional zlib compression. Verification keys also use plain bincode encoding.
-Previously zlib-compressed proof and verifier-key payloads must be decompressed before
-verification with the current API; this encoding change requires no new proof, public
-parameters, or keys.
+no additional zlib compression. Compact verification keys use a separate versioned
+format. The export's internal Serde bridge reads the private verifier-key layout
+of the pinned Nova 0.76.0 implementation; a Nova upgrade requires reviewing that
+bridge and the compact format together.
+
+The MicroSpartan/Mercury configuration uses different compression and commitment-key
+sizes from the previous ordinary-Spartan/HyperKZG configuration. Parameters, keys,
+and proofs from that previous configuration are incompatible. Regenerate the
+parameters and keys and start a new running proof when switching configurations;
+existing powers-of-tau files of sufficient size can be reused. The API simplification
+to `load_public_params` does not change the current parameter, key, or proof encoding.
 
 ## Signing messages and serialization
 
@@ -111,15 +154,18 @@ WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example stats
 
 It checks serialization round trips with `encode` and `decode` throughout all three
 rotations. Only the last rotation prints a size report: one row per named type or
-struct, with separate enum variants where their sizes differ. This includes public
-parameters, proving and verifying keys, and signing payloads and transport messages.
-Shared parameters and keys are generated once. A separate table reports the raw
-proof and verification-key payload sizes exposed by the API as `Vec<u8>`.
+struct, with separate enum variants where their sizes differ. This includes full
+public parameters, signing payloads, and transport messages.
+A separate table reports raw proof and compact verification-key payload sizes
+exposed by the API as `Vec<u8>`. Prepared verifier objects are retained locally and
+have no serialized-size entry.
 Both size tables use decimal KB (`1 KB = 1000 bytes`) with three decimal places.
 
 The final timing table lists calls, total milliseconds, and mean milliseconds for
-each `WRAPS` method the example invokes. Setup calls are measured once; per-rotation
-calls are measured on the third rotation. Timings cover the library call, including
+each `WRAPS` method the example invokes. Public-parameter loading, compact-key
+derivation, and compressed-verifier setup are each timed separately once.
+Proof-construction timing includes internal key derivation and both proof checks.
+Per-rotation calls are measured on the third rotation. Timings cover the library call, including
 its internal work, and exclude the example's serialization checks, random input
 generation, and reporting. Unused methods such as `WRAPS::sentinel_keygen` have no
 timing entry.
@@ -238,6 +284,10 @@ The Halo fork has these changes:
    an AArch64-hosted build for x86_64 even with the assembly backend disabled.
    The optional `bn256-table` generation remains unchanged.
 
+5. `src/derive/field/tower.rs` — quadratic-field byte and representation decoding
+   propagates invalid component encodings as `None`. Upstream unwrapped them
+   first, allowing malformed coordinates in serialized G2 points to panic.
+
 The patch applies to the whole graph, so `nova-snark` picks it up too. The workspace
 root manifest contains:
 
@@ -258,10 +308,11 @@ x86_64 because it is now a compatibility feature that only enables `std`. For ex
 cargo tree --target x86_64-unknown-linux-gnu -e features -i halo2derive
 ```
 
-To rebase onto a newer upstream, reapply the print fix and portable-backend changes,
+To rebase onto a newer upstream, reapply the print, field-decoding, and portable-backend fixes,
 and reassess whether the lint allowances are still needed. Retire the directory and
-its `[patch.crates-io]` entry only when upstream removes the unwanted print and the
-resolved dependencies select portable Halo arithmetic on all supported targets.
+its `[patch.crates-io]` entry only when upstream fixes the unwanted print and invalid
+field decoding, and the resolved dependencies select portable Halo arithmetic on
+all supported targets.
 
 ## Hashes
 

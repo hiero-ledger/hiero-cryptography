@@ -9,8 +9,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Resolved from crates.io. `io` provides the powers-of-tau loader that
-# `WRAPS::setup_public_params` needs.
-nova-snark = { version = "0.76", default-features = false, features = ["io"] }
+# `WRAPS::load_public_params` needs.
+# The compact verifier-key codec is tied to Nova 0.76.0's non-EVM Serde layout.
+nova-snark = { version = "=0.76.0", default-features = false, features = ["io"] }
 
 ff = { version = "0.13.0", features = ["derive"] }
 generic-array = "1.2.0"

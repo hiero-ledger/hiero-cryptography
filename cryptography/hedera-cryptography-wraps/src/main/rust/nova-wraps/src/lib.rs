@@ -86,6 +86,7 @@ mod error;
 mod poseidon;
 mod schnorr;
 mod utils;
+mod verification_key;
 mod wraps;
 
 #[doc(hidden)]
@@ -99,9 +100,9 @@ pub use schnorr::{
 };
 pub use utils::{decode, encode, BitVector};
 pub use wraps::{
-  AddressBook, AddressBookEntry, AddressBookHash, Base, HintsVKHash, NodeId, ProverKey,
-  PublicParams, RotationMessage, SchnorrMultiSignature, SigningProtocolMessage,
-  SigningProtocolObject, SigningProtocolPhase, VerifierKey, Weight, E1, E2, WRAPS,
+  AddressBook, AddressBookEntry, AddressBookHash, Base, CompressedVerifyingKey, HintsVKHash,
+  NodeId, PublicParams, RotationMessage, SchnorrMultiSignature, SigningProtocolMessage,
+  SigningProtocolObject, SigningProtocolPhase, Weight, E1, E2, WRAPS,
 };
 
 #[cfg(test)]

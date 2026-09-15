@@ -1827,6 +1827,38 @@ fn circuit_rejects_an_address_book_the_state_does_not_commit_to() {
     .is_some_and(|path| path.contains("H(ab) == z_in[0]")));
 }
 
+#[test]
+fn quadratic_field_rejects_each_noncanonical_component() {
+  use nova_snark::provider::traits::PairingGroup;
+
+  type PrimaryGroup = <E1 as Engine>::GE;
+  type PairingGroup2 = <PrimaryGroup as PairingGroup>::G2;
+  type PairingAffine = <PairingGroup2 as DlogGroup>::AffineGroupElement;
+
+  // Both Fq2 decoding paths must reject invalid components without unwrapping.
+  fn check_field<F: PrimeField>(_: F) {
+    let zero = F::Repr::default();
+    assert_eq!(zero.as_ref().len(), 64);
+    assert!(bool::from(F::from_repr(zero).is_some()));
+    for range in [0..32, 32..64, 0..64] {
+      let mut repr = F::Repr::default();
+      repr.as_mut()[range].fill(0xff);
+      assert!(bool::from(F::from_repr(repr).is_none()));
+    }
+  }
+  // Infer Fq2 from a coordinate; Nova's Group::Base alias is the prime field.
+  check_field(PairingGroup2::gen().affine().x);
+
+  // Stock G2 Serde also exercises Fq2::from_bytes during point decompression.
+  let encoded = encode(&PairingGroup2::gen().affine()).unwrap();
+  assert_eq!(encoded.len(), 64);
+  for range in [0..32, 32..64, 0..64] {
+    let mut invalid = encoded.clone();
+    invalid[range].fill(0xff);
+    assert!(decode::<PairingAffine>(&invalid).is_err());
+  }
+}
+
 // ---------------------------------------------------------------------
 // End-to-end simulations
 // ---------------------------------------------------------------------
@@ -1840,32 +1872,43 @@ fn circuit_rejects_an_address_book_the_state_does_not_commit_to() {
 //
 // `params/` is git-ignored, so a fresh checkout has to supply it.
 
-/// One trusted setup, shared by every simulation in this run.
-fn wraps_setup() -> &'static (PublicParams, ProverKey, VerifierKey) {
-  static SETUP: OnceLock<(PublicParams, ProverKey, VerifierKey)> = OnceLock::new();
+/// Public parameters and a compressed verifier, reused by every simulation.
+fn wraps_setup() -> &'static (PublicParams, CompressedVerifyingKey) {
+  static SETUP: OnceLock<(PublicParams, CompressedVerifyingKey)> = OnceLock::new();
   SETUP.get_or_init(|| {
-    let pp = WRAPS::setup_public_params(&ptau_dir()).expect("powers-of-tau setup");
-    let pk = WRAPS::setup_prover(&pp).expect("prover key setup");
-    let vk = WRAPS::setup_verifier(&pp).expect("verifier key setup");
-    (pp, pk, vk)
+    let pp = WRAPS::load_public_params(&ptau_dir()).expect("powers-of-tau parameters");
+    let vk = WRAPS::setup_compressed_verifier(&pp).expect("compressed verifier setup");
+    (pp, vk)
   })
 }
 
 #[test]
-fn setup_public_params_and_keys_are_deterministic() {
-  // Independent setup from the same ceremony produces identical parameters and keys.
-  let (expected_pp, expected_pk, expected_vk) = wraps_setup();
-  let pp = WRAPS::setup_public_params(&ptau_dir()).unwrap();
-  let pk = WRAPS::setup_prover(&pp).unwrap();
-  let vk = WRAPS::setup_verifier(&pp).unwrap();
+fn load_public_params_and_keys_are_deterministic() {
+  // Independent loading from the same ceremony produces identical parameters and keys.
+  let (expected_pp, expected_vk) = wraps_setup();
+  let pp = WRAPS::load_public_params(&ptau_dir()).unwrap();
+  let vk = WRAPS::setup_compressed_verifier(&pp).unwrap();
 
   assert_eq!(pp.num_constraints(), expected_pp.num_constraints());
   assert_eq!(pp.digest(), expected_pp.digest());
-  assert_eq!(encode(&pk).unwrap(), encode(expected_pk).unwrap());
   assert_eq!(
-    WRAPS::get_compressed_verification_key_bytes(&vk).unwrap(),
-    WRAPS::get_compressed_verification_key_bytes(expected_vk).unwrap(),
+    encode(&vk.inner).unwrap(),
+    encode(&expected_vk.inner).unwrap(),
   );
+}
+
+#[test]
+fn prepared_key_matches_the_stock_mercury_key() {
+  let (pp, prepared) = wraps_setup();
+  let (_, stock) = nova_snark::nova::CompressedSNARK::<
+    E1,
+    E2,
+    RotationCircuit<E2>,
+    crate::wraps::S1,
+    crate::wraps::S2,
+  >::setup(pp)
+  .unwrap();
+  assert_eq!(encode(&prepared.inner).unwrap(), encode(&stock).unwrap());
 }
 
 /// Every artifact the library hands out, measured on a real one-rotation chain.
@@ -1875,17 +1918,42 @@ fn setup_public_params_and_keys_are_deterministic() {
 /// changes to the circuit or proving system.
 #[test]
 fn artifact_sizes() {
-  let (wraps_pp, wraps_pk, wraps_vk) = wraps_setup();
+  use crate::verification_key::{
+    Descriptor, ARITY, MAGIC, PRIMARY_DIMENSION, PRIMARY_DOMAIN, SECONDARY_DIMENSION,
+    SECONDARY_GENERATORS, VERSION, WIRE_BYTES,
+  };
 
-  // Public parameters and keys are separate artifacts, each counted once.
+  let (wraps_pp, wraps_vk) = wraps_setup();
+
+  // Public parameters and the verification key are separate artifacts.
   let pp_bytes = encode(wraps_pp).unwrap().len();
-  let prover_key_bytes = encode(wraps_pk).unwrap().len();
-  let verification_key_bytes = encode(wraps_vk).unwrap().len();
-  // A standalone verifier receives `vk` alone, encoded with bincode.
-  // It never touches the folding parameters, so `pp` is not part of the payload.
-  let verifier_key_payload_bytes = WRAPS::get_compressed_verification_key_bytes(wraps_vk)
-    .unwrap()
-    .len();
+  let verification_key_bytes = encode(&wraps_vk.inner).unwrap().len();
+
+  // Check the actual exported descriptor without a separate setup or fixture.
+  let compact_key = WRAPS::get_compressed_verification_key(wraps_pp).unwrap();
+  let verifier_key_payload_bytes = compact_key.len();
+  assert_eq!(verifier_key_payload_bytes, WIRE_BYTES);
+  assert_eq!(&compact_key[..8], &MAGIC);
+  assert_eq!(&compact_key[8..10], &VERSION.to_le_bytes());
+  let descriptor: Descriptor = decode(&compact_key).unwrap();
+  assert_eq!(encode(&descriptor).unwrap(), compact_key);
+  assert_eq!(descriptor.magic, MAGIC);
+  assert_eq!(descriptor.version, VERSION);
+  assert_eq!(descriptor.arity, ARITY);
+  assert_eq!(descriptor.pp_digest, wraps_pp.digest());
+  assert_eq!(descriptor.primary.num_cons, PRIMARY_DIMENSION);
+  assert_eq!(descriptor.primary.num_vars, PRIMARY_DIMENSION);
+  assert_eq!(descriptor.primary.shape_commitment.N, PRIMARY_DOMAIN);
+  assert_eq!(descriptor.secondary.num_cons, SECONDARY_DIMENSION);
+  assert_eq!(descriptor.secondary.num_vars, SECONDARY_DIMENSION);
+  assert_eq!(
+    descriptor.secondary.shape_commitment.N,
+    SECONDARY_GENERATORS
+  );
+  assert_eq!(
+    descriptor.secondary.generator_count,
+    SECONDARY_GENERATORS as u64,
+  );
 
   // One genesis rotation, to get a proof of each kind.
   let (genesis_ab, genesis_keys) = random_address_book();
@@ -1900,8 +1968,6 @@ fn artifact_sizes() {
   );
   let (running, compressed) = WRAPS::construct_wraps_proof(
     wraps_pp,
-    wraps_pk,
-    wraps_vk,
     &ab_genesis_hash,
     &genesis_ab,
     &genesis_ab,
@@ -1923,8 +1989,13 @@ fn artifact_sizes() {
     "compression should buy two orders of magnitude"
   );
   assert_eq!(
-    verifier_key_payload_bytes, verification_key_bytes,
-    "the verification-key payload uses the ordinary bincode encoding"
+    verifier_key_payload_bytes, 778,
+    "the compact verification-key payload must stay within its fixed wire format"
+  );
+
+  assert!(
+    verification_key_bytes > 4_000_000,
+    "expanded key includes IPA bases"
   );
 
   // Absolute guards, generously sized.
@@ -1943,20 +2014,15 @@ fn artifact_sizes() {
     running.len()
   );
   assert!(
-    verifier_key_payload_bytes < 64 * 1024 * 1024,
-    "verification key (bincode): {verifier_key_payload_bytes} bytes"
-  );
-  assert!(
-    prover_key_bytes < 512 * 1024 * 1024,
-    "proving key: {prover_key_bytes} bytes"
+    verifier_key_payload_bytes < 1024,
+    "compact verification key: {verifier_key_payload_bytes} bytes"
   );
 }
 
 #[test]
 fn wraps_simulation() {
   let num_steps = 5;
-  let (wraps_pp, wraps_pk, wraps_vk) = wraps_setup();
-  let vk_bytes = WRAPS::get_compressed_verification_key_bytes(wraps_vk).unwrap();
+  let (wraps_pp, wraps_vk) = wraps_setup();
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
@@ -1985,8 +2051,6 @@ fn wraps_simulation() {
 
     let (uncompressed, compressed) = WRAPS::construct_wraps_proof(
       wraps_pp,
-      wraps_pk,
-      wraps_vk,
       &ab_genesis_hash,
       &prev.0,
       &next.0,
@@ -2008,7 +2072,7 @@ fn wraps_simulation() {
     assert_eq!(running.z0, succinct.z0);
     assert_eq!(running.zi, succinct.zi);
     assert!(WRAPS::verify_compressed_wraps_proof(
-      &vk_bytes,
+      wraps_vk,
       &compressed,
       &ab_genesis_hash,
       hints_vk
@@ -2023,11 +2087,63 @@ fn wraps_simulation() {
     .unwrap());
 
     if i == 0 {
+      // Both verification paths must bind the caller's expected endpoints.
+      let wrong_genesis = ab_genesis_hash + Base::ONE;
+      let wrong_hints = [0xffu8; 1480];
+      for (genesis, hints) in [
+        (&wrong_genesis, &hints_vk),
+        (&ab_genesis_hash, &wrong_hints),
+      ] {
+        assert!(
+          !WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, genesis, hints,).unwrap()
+        );
+        assert!(
+          !WRAPS::verify_uncompressed_wraps_proof(wraps_pp, &uncompressed, genesis, hints,)
+            .unwrap()
+        );
+      }
+
+      // The genesis rotation keeps the same book, so its signature also
+      // authorizes this next step. Only the caller's claimed genesis is wrong.
+      assert!(matches!(
+        WRAPS::construct_wraps_proof(
+          wraps_pp,
+          &wrong_genesis,
+          &prev.0,
+          &next.0,
+          Some(uncompressed.clone()),
+          hints_vk,
+          &multisignature,
+        ),
+        Err(WrapsError::Cryptography(reason))
+          if reason == "the uncompressed proof just produced does not verify"
+      ));
+
+      // Check the compressed statement metadata as well as the proof itself.
+      for mutation in 0..4 {
+        let mut tampered: CompressedWrapsProof = decode(&compressed).unwrap();
+        match mutation {
+          0 => tampered.num_steps += 1,
+          1 => tampered.zi[0] += Base::ONE,
+          2 => tampered.z0[0] += Base::ONE,
+          _ => {
+            tampered.zi.pop();
+          }
+        }
+        assert!(!WRAPS::verify_compressed_wraps_proof(
+          wraps_vk,
+          &encode(&tampered).unwrap(),
+          &ab_genesis_hash,
+          hints_vk,
+        )
+        .unwrap());
+      }
+
       let mut trailing = compressed.clone();
       trailing.push(0);
       assert!(matches!(
         WRAPS::verify_compressed_wraps_proof(
-          &vk_bytes,
+          wraps_vk,
           &trailing,
           &ab_genesis_hash,
           hints_vk,
@@ -2042,8 +2158,6 @@ fn wraps_simulation() {
       outside_book.0[shorter_book.len()] = true;
       let err = WRAPS::construct_wraps_proof(
         wraps_pp,
-        wraps_pk,
-        wraps_vk,
         &WRAPS::compute_addressbook_hash(&shorter_book).unwrap(),
         &shorter_book,
         &shorter_book,
@@ -2075,8 +2189,6 @@ fn wraps_simulation() {
         assert!(matches!(
           WRAPS::construct_wraps_proof(
             wraps_pp,
-            wraps_pk,
-            wraps_vk,
             &ab_genesis_hash,
             &prev.0,
             &next.0,
@@ -2099,8 +2211,6 @@ fn wraps_simulation() {
     assert!(
       WRAPS::construct_wraps_proof(
         wraps_pp,
-        wraps_pk,
-        wraps_vk,
         &ab_genesis_hash,
         &prev.0,
         &next.0,
@@ -2125,8 +2235,7 @@ fn wraps_simulation() {
 fn wraps_simulation_fails_below_weight_threshold() {
   const SUFFICIENT_STEPS: usize = 4;
   let num_steps = 10;
-  let (wraps_pp, wraps_pk, wraps_vk) = wraps_setup();
-  let vk_bytes = WRAPS::get_compressed_verification_key_bytes(wraps_vk).unwrap();
+  let (wraps_pp, wraps_vk) = wraps_setup();
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
@@ -2162,8 +2271,6 @@ fn wraps_simulation_fails_below_weight_threshold() {
 
     let result = WRAPS::construct_wraps_proof(
       wraps_pp,
-      wraps_pk,
-      wraps_vk,
       &ab_genesis_hash,
       &prev.0,
       &next.0,
@@ -2190,7 +2297,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
 
     let (uncompressed, compressed) = result.expect("WRAPS proof should be created");
     assert!(
-      WRAPS::verify_compressed_wraps_proof(&vk_bytes, &compressed, &ab_genesis_hash, hints_vk)
+      WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, &ab_genesis_hash, hints_vk)
         .unwrap(),
       "step {i}: compressed proof failed to verify",
     );

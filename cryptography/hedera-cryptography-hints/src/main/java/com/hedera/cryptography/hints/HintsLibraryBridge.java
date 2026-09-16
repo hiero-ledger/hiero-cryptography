@@ -31,7 +31,7 @@ public class HintsLibraryBridge {
      * This changed from 1632 when the four Plonkish quotient relations were merged into one
      * (whitepaper section 3.4.3), which removed 3 G1 points and 3 field elements from the proof.
      */
-    private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 9 * 96 + 192 + 6 * 32; // 1248
+    public static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 9 * 96 + 192 + 6 * 32; // 1248
 
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
     private static final int COMPRESSED_G1_LENGTH_BYTES = 48;

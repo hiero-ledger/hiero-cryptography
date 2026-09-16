@@ -1898,6 +1898,81 @@ fn load_public_params_and_keys_are_deterministic() {
 }
 
 #[test]
+fn verification_keys_are_deterministic_across_processes() {
+  use std::{fs, process::Command, time::SystemTime};
+
+  const CHILD_OUTPUT: &str = "WRAPS_KEY_TEST_CHILD_OUTPUT";
+  const TEST_NAME: &str = "tests::verification_keys_are_deterministic_across_processes";
+  const ARTIFACTS: [&str; 3] = ["compact-vk.bin", "full-vk.bin", "pp-digest.bin"];
+
+  // Each child runs only this test with fresh process globals and OS randomness.
+  // It derives both keys from independently loaded parameters, then exits.
+  if let Some(output) = std::env::var_os(CHILD_OUTPUT) {
+    let output = std::path::PathBuf::from(output);
+    let pp = WRAPS::load_public_params(&ptau_dir()).expect("child public parameters");
+    let vk = WRAPS::setup_compressed_verifier(&pp).expect("child verifier setup");
+    let compact = WRAPS::get_compressed_verification_key(&pp).expect("child compact export");
+    let full = encode(&vk.inner).expect("serialize full Nova verifier key");
+    assert_eq!(compact.len(), 778);
+    assert_eq!(full.len(), 4_738_776);
+    fs::write(output.join(ARTIFACTS[0]), compact).unwrap();
+    fs::write(output.join(ARTIFACTS[1]), full).unwrap();
+    fs::write(output.join(ARTIFACTS[2]), encode(&pp.digest()).unwrap()).unwrap();
+    return;
+  }
+
+  let nonce = SystemTime::now()
+    .duration_since(SystemTime::UNIX_EPOCH)
+    .unwrap()
+    .as_nanos();
+  let output = std::env::temp_dir().join(format!(
+    "novawraps-key-determinism-{}-{nonce}",
+    std::process::id()
+  ));
+  fs::create_dir(&output).unwrap();
+  let executable = std::env::current_exe().unwrap();
+  let parameters = fs::canonicalize(ptau_dir()).expect("powers-of-tau directory");
+  let mut expected: Option<Vec<Vec<u8>>> = None;
+
+  for threads in [1, 4, 16] {
+    let run = output.join(format!("threads-{threads}"));
+    fs::create_dir(&run).unwrap();
+    let child = Command::new(&executable)
+      .args(["--exact", TEST_NAME, "--nocapture"])
+      .env(CHILD_OUTPUT, &run)
+      .env("WRAPS_PTAU_DIR", &parameters)
+      .env("RAYON_NUM_THREADS", threads.to_string())
+      .output()
+      .expect("run fresh verifier-key process");
+    fs::write(run.join("stdout.log"), &child.stdout).unwrap();
+    fs::write(run.join("stderr.log"), &child.stderr).unwrap();
+    assert!(
+      child.status.success(),
+      "child with {threads} threads failed; logs retained in {}: {}",
+      run.display(),
+      String::from_utf8_lossy(&child.stderr),
+    );
+    let artifacts = ARTIFACTS
+      .iter()
+      .map(|name| fs::read(run.join(name)).expect("read child key artifact"))
+      .collect::<Vec<_>>();
+    if let Some(expected) = &expected {
+      for ((name, actual), expected) in ARTIFACTS.iter().zip(&artifacts).zip(expected) {
+        assert!(
+          actual == expected,
+          "{name} differs with {threads} threads; artifacts retained in {}",
+          output.display(),
+        );
+      }
+    } else {
+      expected = Some(artifacts);
+    }
+    println!("fresh process with {threads} threads: all key artifacts match");
+  }
+  fs::remove_dir_all(output).expect("remove successful key-comparison artifacts");
+}
+
+#[test]
 fn prepared_key_matches_the_stock_mercury_key() {
   let (pp, prepared) = wraps_setup();
   let (_, stock) = nova_snark::nova::CompressedSNARK::<

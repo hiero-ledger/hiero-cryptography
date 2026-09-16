@@ -3,10 +3,11 @@
 //! multisignature and folded into one Nova proof.
 //!
 //! Serializable values cross a bincode boundary before use, with byte sizes printed
-//! for successful return values and function arguments. Public parameters and compact
-//! verification-key bytes are round-tripped once. A compressed verifier is prepared
-//! once from the public parameters; uncompressed verification uses those parameters
-//! directly. Compact export is measured separately from verifier setup. Key generation
+//! for successful return values and function arguments. Between rotations, only a
+//! serialized checkpoint is retained: public parameters, genesis hash, committee,
+//! signing keys, running proof, and rotation count. Each iteration restores those
+//! values and derives a fresh compressed verifier from the decoded parameters.
+//! Compact export is measured separately from verifier setup. Key generation
 //! and signing show one representative member per book/phase. Only sizes, never key
 //! or seed bytes, are printed. Payload sizes are separate from demo transport envelopes.
 //!
@@ -17,11 +18,22 @@
 //! WRAPS_PTAU_DIR=./params cargo run --release -p novawraps --example demo
 //! ```
 use novawraps::{
-  decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
+  decode, encode, AddressBook, Base, BitVector, PublicParams, RotationMessage, RoundMessage,
   SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
   SigningProtocolPhase, E2, ENTROPY_SIZE, MAX_AB_SIZE, WRAPS,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+/// Everything needed to continue the demo at the next rotation.
+/// The prepared verifier is derived from `pp` after restoring this checkpoint.
+#[derive(Serialize, Deserialize)]
+struct DemoState {
+  pp: PublicParams,
+  ab_genesis_hash: Base,
+  prev: (AddressBook<E2>, Vec<SchnorrSecretKey<E2>>),
+  running_proof: Option<Vec<u8>>,
+  completed_rotations: usize,
+}
 
 fn main() {
   use std::time::Instant;
@@ -51,13 +63,6 @@ fn main() {
   );
   let vk_bytes = round_trip("get_compressed_verification_key return: Vec<u8>", vk_bytes);
   println!("Compact verification key payload: {} bytes", vk_bytes.len());
-  // Prepare from public parameters once; retain the verifier across rotations.
-  let start = Instant::now();
-  let wraps_vk = WRAPS::setup_compressed_verifier(&pp).expect("compressed verifier setup");
-  println!(
-    "WRAPS::setup_compressed_verifier, took {:?}",
-    start.elapsed()
-  );
   let (primary, secondary) = pp.num_constraints();
   println!("Number of constraints per step (primary circuit): {primary}");
   println!("Number of constraints per step (secondary circuit): {secondary}");
@@ -102,13 +107,38 @@ fn main() {
   );
   println!("A book with 4 seats held open by the sentinel key validates");
 
-  let mut prev = (genesis_ab, genesis_keys);
-  let mut running_proof: Option<Vec<u8>> = None;
+  let mut checkpoint = save_checkpoint(DemoState {
+    pp,
+    ab_genesis_hash,
+    prev: (genesis_ab, genesis_keys),
+    running_proof: None,
+    completed_rotations: 0,
+  });
 
-  for i in 0..num_steps {
+  loop {
+    // This byte array could have been read from disk. All rotation state comes
+    // from decoding it; no previous parameter object or verifier is reused.
+    let DemoState {
+      pp,
+      ab_genesis_hash,
+      prev,
+      running_proof,
+      completed_rotations: i,
+    } = restore_checkpoint(&checkpoint);
+    assert!(i <= num_steps);
+    assert_eq!(running_proof.is_none(), i == 0);
+    if i == num_steps {
+      break; // The final checkpoint has also been deserialized and checked.
+    }
     println!(
       "--------------------------------------- rotation {} of {num_steps}",
       i + 1
+    );
+    let start = Instant::now();
+    let wraps_vk = WRAPS::setup_compressed_verifier(&pp).expect("compressed verifier setup");
+    println!(
+      "  setup_compressed_verifier from restored parameters, took {:?}",
+      start.elapsed()
     );
     // The genesis step rotates the book onto itself; later steps propose a fresh one.
     let next = if i == 0 {
@@ -160,10 +190,10 @@ fn main() {
       WRAPS::verify_signature(&signing_book, &signed_message, &signature).unwrap(),
     ));
 
-    // Parameters were decoded once. Construction derives keys and checks both
-    // proof forms internally; the prepared compressed verifier is independent.
+    // Parameters came from this iteration's checkpoint. Construction derives
+    // its own keys and checks both proof forms internally.
     let (genesis_hash, prev_ab, next_ab, prev_proof, proof_hints_vk, proof_signature) = round_trip(
-      "construct_wraps_proof inputs (excluding retained public parameters)",
+      "construct_wraps_proof inputs (excluding restored public parameters)",
       (
         ab_genesis_hash,
         prev.0.clone(),
@@ -200,7 +230,7 @@ fn main() {
     );
 
     let (proof, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); prepared key reused",
+      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); key derived from restored parameters",
       (compressed, ab_genesis_hash, hints_vk.clone()),
     );
 
@@ -217,9 +247,9 @@ fn main() {
       verified
     ));
 
-    // Check the same chain from its running proof using the retained parameters.
+    // Check the same chain from its running proof using the restored parameters.
     let (uncompressed, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_uncompressed_wraps_proof inputs (excluding retained public parameters)",
+      "verify_uncompressed_wraps_proof inputs (excluding restored public parameters)",
       (uncompressed, ab_genesis_hash, hints_vk.clone()),
     );
     let start = Instant::now();
@@ -255,8 +285,14 @@ fn main() {
     assert!(rejected.is_err(), "a minority must not be able to rotate");
     println!("  a one-third committee was rejected, as it should be");
 
-    prev = next;
-    running_proof = Some(uncompressed);
+    drop(wraps_vk);
+    checkpoint = save_checkpoint(DemoState {
+      pp,
+      ab_genesis_hash,
+      prev: next,
+      running_proof: Some(uncompressed),
+      completed_rotations: i + 1,
+    });
   }
 
   println!("=========================================================");
@@ -267,6 +303,31 @@ fn main() {
 // =========================================================================
 // Serialization using the library's shared codec.
 // =========================================================================
+
+/// Consumes the live state so only bytes survive to the next iteration.
+fn save_checkpoint(state: DemoState) -> Vec<u8> {
+  let bytes = encode(&state).expect("serialize demo checkpoint");
+  println!(
+    "  saved checkpoint after {} rotations: {} bytes",
+    state.completed_rotations,
+    bytes.len()
+  );
+  bytes
+}
+
+fn restore_checkpoint(bytes: &[u8]) -> DemoState {
+  let state: DemoState = decode(bytes).expect("deserialize demo checkpoint");
+  assert!(
+    encode(&state).expect("reserialize demo checkpoint") == bytes,
+    "checkpoint round trip changed the encoding"
+  );
+  println!(
+    "  restored checkpoint after {} rotations: {} bytes; round trip OK",
+    state.completed_rotations,
+    bytes.len()
+  );
+  state
+}
 
 /// Checks a complete round trip and returns the decoded value for subsequent calls.
 /// Byte equality avoids requiring PartialEq/Debug on Nova's parameters and keys.

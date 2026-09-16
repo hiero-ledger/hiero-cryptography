@@ -275,7 +275,9 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
+        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
+        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -375,7 +377,9 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
+        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
+        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -481,7 +485,9 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
+        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
+        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -646,7 +652,9 @@ impl HinTS {
 
         // CRS must be large enough to support the operation
         // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
+        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
+        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
+        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
             return Err(HinTSError::InsufficientCRS(n));
         }
 
@@ -1240,6 +1248,26 @@ mod tests {
     /// if the input buffer cannot be deserialized properly.
     fn deserialize<T: CanonicalDeserialize>(buf: &[u8]) -> T {
         T::deserialize_uncompressed(buf).unwrap()
+    }
+
+    // Regression guard: `powers_of_g.len() - 1` underflowed to usize::MAX on an empty CRS, so the sufficiency gate
+    // accepted every n and the caller went on to size a polynomial from that n.
+    #[test]
+    fn empty_crs_is_insufficient_rather_than_underflowing() {
+        let empty_crs = CRS {
+            powers_of_g: vec![],
+            powers_of_h: vec![],
+        };
+        let sk = HinTS::keygen([7u8; 32]).unwrap();
+
+        assert!(
+            matches!(HinTS::hint_gen(&empty_crs, 4, 0, &sk), Err(HinTSError::InsufficientCRS(4))),
+            "hint_gen must report an empty CRS as insufficient"
+        );
+        assert!(
+            matches!(HinTS::preprocess(4, &empty_crs, &HashMap::new()), Err(HinTSError::InsufficientCRS(4))),
+            "preprocess must report an empty CRS as insufficient"
+        );
     }
 
     #[test]

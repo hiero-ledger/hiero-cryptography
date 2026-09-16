@@ -283,7 +283,6 @@ The Halo fork has these changes:
    the build host rather than the compilation target, which would otherwise reject
    an AArch64-hosted build for x86_64 even with the assembly backend disabled.
    The optional `bn256-table` generation remains unchanged.
-
 5. `src/derive/field/tower.rs` — quadratic-field byte and representation decoding
    propagates invalid component encodings as `None`. Upstream unwrapped them
    first, allowing malformed coordinates in serialized G2 points to panic.

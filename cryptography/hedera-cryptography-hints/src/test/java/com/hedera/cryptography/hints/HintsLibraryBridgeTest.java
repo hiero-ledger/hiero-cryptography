@@ -36,6 +36,29 @@ public class HintsLibraryBridgeTest {
         return crs;
     }
 
+    // Regression guard for the CRS size gate. `304 + n * 288` was evaluated in int arithmetic and wraps for large
+    // powers of two -- to a negative value at 2^23 and 2^26, and to exactly 304 for 2^27 through 2^30 -- so a 304-byte
+    // blob satisfied the gate for a network of up to a billion parties. preprocess was the reachable caller because
+    // the bound on n lived in validatePartyId, which it reaches only inside a loop over the party list; an empty list
+    // skipped it. The native sufficiency check underflowed on the resulting empty CRS and passed too, after which the
+    // vanishing polynomial was sized from n and grew without bound in native memory.
+    @Test
+    void testPreprocessRejectsOverflowingNetworkSize() {
+        final byte[] tinyCrs = new byte[304];
+
+        for (final int n : new int[] {1 << 23, 1 << 26, 1 << 27, 1 << 28, 1 << 29, 1 << 30}) {
+            INSTANCE.resetCache();
+            assertNull(
+                    INSTANCE.preprocess(tinyCrs, new int[0], new byte[0][], new long[0], n),
+                    () -> "a 304-byte CRS must not satisfy the size gate for n = " + n);
+        }
+
+        // Negative control: the same blob is rejected for a small, in-range n as well, so the rejections above are the
+        // size comparison working rather than only the bound on n.
+        INSTANCE.resetCache();
+        assertNull(INSTANCE.preprocess(tinyCrs, new int[0], new byte[0][], new long[0], 4));
+    }
+
     @Test
     void testGenerateSecretKey() {
         final byte[] secretKey = INSTANCE.generateSecretKey(HintsConstants.RANDOM_2);

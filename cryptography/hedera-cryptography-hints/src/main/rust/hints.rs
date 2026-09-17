@@ -273,13 +273,7 @@ impl HinTS {
             );
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
-        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
-        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         let sk = &sk_with_pop.secret;
 
@@ -375,13 +369,7 @@ impl HinTS {
             );
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
-        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
-        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         // return false immediately if some simple checks dont hold on the hint
         check_or_return_false!(hint.i == i);
@@ -483,13 +471,7 @@ impl HinTS {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
-        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
-        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         let mut weights: Vec<Weight> = Vec::new();
         let mut epks: Vec<ExtendedPublicKey> = Vec::new();
@@ -650,13 +632,7 @@ impl HinTS {
     ) -> Result<ThresholdSignature, HinTSError> {
         let n = ak.n;
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        // powers_of_g holds degrees 0..=max_degree, so subtract with checked_sub: an empty vector must be reported as
-        // insufficient rather than underflowing to usize::MAX, which would make this gate accept every n.
-        if crs.powers_of_g.len().checked_sub(1).map_or(true, |max_degree| max_degree < n) {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         // we require n to be a power of 2
         if !utils::is_n_valid(n) {
@@ -950,6 +926,21 @@ impl HinTS {
         check_or_return_false!(lhs == rhs);
 
         Ok(true)
+    }
+}
+
+/// Checks that `crs` carries enough powers of tau to support a network of size `n`.
+///
+/// `powers_of_g` holds degrees `0..=max_degree`, so the CRS supports `n` exactly when
+/// `max_degree >= n`. The subtraction is checked because a CRS with no powers has no maximum
+/// degree at all: it must be reported as insufficient rather than underflowing to `usize::MAX`,
+/// which would make this gate accept every `n`.
+///
+/// NOTE: this checks the size only. The CRS must also be valid, but we assume that here!
+fn check_crs_is_sufficient(crs: &CRS, n: usize) -> Result<(), HinTSError> {
+    match crs.powers_of_g.len().checked_sub(1) {
+        Some(max_degree) if max_degree >= n => Ok(()),
+        _ => Err(HinTSError::InsufficientCRS(n)),
     }
 }
 

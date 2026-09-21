@@ -6,4 +6,5 @@ dependencies {
     published(project(":libsodium"))
     published(project(":libsecp256k1"))
     published(project(":libxkcp"))
+    published(project(":security"))
 }

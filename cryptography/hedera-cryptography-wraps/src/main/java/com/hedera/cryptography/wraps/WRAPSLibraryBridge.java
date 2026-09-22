@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.hedera.cryptography.wraps;
 
+import com.hedera.common.nativesupport.ResourceFile;
 import com.hedera.common.nativesupport.SingletonLoader;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Set;
 
@@ -17,7 +19,7 @@ public class WRAPSLibraryBridge {
     /** The max theoretical sum of weights all nodes together can have, which is 2^63-1 because we use signed long. */
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
 
-    private static final int COMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 704;
+    private static final int COMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 11368;
     private static final int ADDRESS_BOOK_HASH_LENGTH_BYTES = 32;
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
 
@@ -28,7 +30,32 @@ public class WRAPSLibraryBridge {
         WRAPSLibraryBridge.class
                 .getModule()
                 .addOpens(INSTANCE_HOLDER.getNativeLibraryPackageName(), SingletonLoader.class.getModule());
+        WRAPSLibraryBridge.class.getModule().addOpens("com.hedera.cryptography.wraps", ResourceFile.class.getModule());
     }
+
+    /// A singleton used to initialize the Public Params for Nova WRAPS.
+    private static class PublicParamsLoader {
+        private static final PublicParamsLoader INSTANCE = new PublicParamsLoader();
+        private static final String FILE_NAME = "ppot_pruned_20.ptau";
+
+        private final boolean loaded;
+
+        private PublicParamsLoader() {
+            final Path path = ResourceFile.extract(
+                            WRAPSLibraryBridge.class, "com/hedera/cryptography/wraps/" + FILE_NAME, "r--------")
+                    // Translate the file path to a path to its parent directory:
+                    .toAbsolutePath()
+                    .getParent();
+
+            File dir = path.toFile();
+            this.loaded = dir.exists()
+                    && dir.isDirectory()
+                    && Set.of(dir.list()).contains(FILE_NAME)
+                    && WRAPSLibraryBridge.loadPublicParams(path.toString());
+        }
+    }
+
+    private static native boolean loadPublicParams(String publicParamsPath);
 
     private WRAPSLibraryBridge() {
         // private constructor to ensure singleton
@@ -36,13 +63,6 @@ public class WRAPSLibraryBridge {
 
     /**
      * Returns the singleton instance of this library adapter.
-     * <p>
-     * An optional TSS_LIB_WRAPS_SWAP_FILE environment variable may be defined to point to a file name
-     * that will be used as a memory-on-disk for the WRAPS 2.0 native code.
-     * The size of the file is hard-coded in the native code as a static constant due to Rust language specifics.
-     * See src/main/rust/wraps/src/alloc.rs for the definitions.
-     * If the env var is undefined, or the file cannot be open/created/resized, or any other errors occur,
-     * then the library will use the system RAM only.
      *
      * @return the singleton instance of this library adapter.
      */
@@ -52,32 +72,10 @@ public class WRAPSLibraryBridge {
 
     /**
      * Checks if proof construction and verification is potentially supported.
-     * Both the operations build crypto keys from binary artifacts read from disk
-     * at the path specified by the TSS_LIB_WRAPS_ARTIFACTS_PATH environment variable.
-     * If the variable is unset or empty, or the specified path doesn't contain
-     * the expected files, then this method returns false.
-     * Note that only absolute paths are supported. The path MUST NOT contain double periods at all.
      * @return true if `constructWrapsProof` and `verifyCompressedProof` are operational
      */
     public static boolean isProofSupported() {
-        final String path = System.getenv("TSS_LIB_WRAPS_ARTIFACTS_PATH");
-        if (path == null || path.isBlank()) {
-            return false;
-        }
-        // Don't support relative paths because absolute paths are safer.
-        // In fact, we don't support unusual file or dir names with double periods at all:
-        if (path.contains("..")) {
-            return false;
-        }
-        File dir = new File(path);
-        if (!dir.exists() || !dir.isDirectory()) {
-            return false;
-        }
-        final Set<String> files = Set.of(dir.list());
-        if (!files.containsAll(Set.of("decider_pp.bin", "decider_vp.bin", "nova_pp.bin", "nova_vp.bin"))) {
-            return false;
-        }
-        return true;
+        return PublicParamsLoader.INSTANCE.loaded;
     }
 
     // ------------------------------------------------------------------------------------------------------
@@ -85,7 +83,7 @@ public class WRAPSLibraryBridge {
     // ------------------------------------------------------------------------------------------------------
 
     /** The maximum size of an AddressBook. */
-    public static final int MAX_AB_SIZE = 128;
+    public static final int MAX_AB_SIZE = 64;
 
     /** Size of a random seed. */
     public static final int ENTROPY_SIZE = 32;
@@ -103,8 +101,9 @@ public class WRAPSLibraryBridge {
     // ------------------------------------------------------------------------------------------------------
 
     // The following constants aren't explicitly defined in native code, but these are the sizes that we see:
-    private static final int ROUND1_MESSAGE_SIZE = 40;
-    private static final int ROUND2_3_MESSAGE_SIZE = 72;
+    private static final int ROUND1_MESSAGE_SIZE = 44;
+    private static final int ROUND2_MESSAGE_SIZE = 44;
+    private static final int ROUND3_MESSAGE_SIZE = 76;
 
     /**
      * Derives a Schnorr keypair deterministically from the provided entropy.
@@ -225,7 +224,7 @@ public class WRAPSLibraryBridge {
             }
         } else if (phase == SigningProtocolPhase.R3) {
             if (!validateRoundMessages(round1Messages, ROUND1_MESSAGE_SIZE)
-                    || !validateRoundMessages(round2Messages, ROUND2_3_MESSAGE_SIZE)
+                    || !validateRoundMessages(round2Messages, ROUND2_MESSAGE_SIZE)
                     || !Arrays.equals(round3Messages, EMPTY_BYTE_ARRAY_2)) {
                 return null;
             }
@@ -243,8 +242,8 @@ public class WRAPSLibraryBridge {
                 return null;
             }
             if (!validateRoundMessages(round1Messages, ROUND1_MESSAGE_SIZE)
-                    || !validateRoundMessages(round2Messages, ROUND2_3_MESSAGE_SIZE)
-                    || !validateRoundMessages(round3Messages, ROUND2_3_MESSAGE_SIZE)) {
+                    || !validateRoundMessages(round2Messages, ROUND2_MESSAGE_SIZE)
+                    || !validateRoundMessages(round3Messages, ROUND3_MESSAGE_SIZE)) {
                 return null;
             }
             if (schnorrPublicKeys.length == 0
@@ -349,8 +348,12 @@ public class WRAPSLibraryBridge {
      * @return a hash of the address book, or null if errors occur
      */
     public byte[] hashAddressBook(final byte[][] schnorrPublicKeys, final long[] weights, final long[] nodeIds) {
-        if (schnorrPublicKeys == null
-                || weights == null
+        // For some weird reason, the JVM goes and tries to read length of a null array,
+        // so we perform the null check separately here:
+        if (schnorrPublicKeys == null) {
+            return null;
+        }
+        if (weights == null
                 || schnorrPublicKeys.length > MAX_AB_SIZE
                 || schnorrPublicKeys.length != weights.length
                 || nodeIds == null
@@ -503,8 +506,10 @@ public class WRAPSLibraryBridge {
      */
     public boolean verifyCompressedProof(
             byte[] compressedProof, byte[] genesisAddressBookHash, byte[] tssVerificationKey) {
-        // Don't check the isProofSupported() because this call doesn't require the binary artifacts anymore
-        // (because the WRAPSVerificationKey hard-codes the key.)
+        // Ensure the PublicParams are loaded first.
+        if (!isProofSupported()) {
+            return false;
+        }
         if (genesisAddressBookHash == null
                 || genesisAddressBookHash.length != ADDRESS_BOOK_HASH_LENGTH_BYTES
                 || tssVerificationKey == null
@@ -513,15 +518,11 @@ public class WRAPSLibraryBridge {
                 || compressedProof.length != COMPRESSED_WRAPS_PROOF_LENGTH_BYTES) {
             return false;
         }
-        return verifyCompressedProofImpl(
-                compressedProof, genesisAddressBookHash, tssVerificationKey, WRAPSVerificationKey.getCurrentKey());
+        return verifyCompressedProofImpl(compressedProof, genesisAddressBookHash, tssVerificationKey);
     }
 
     private native boolean verifyCompressedProofImpl(
-            byte[] compressedProof,
-            byte[] genesisAddressBookHash,
-            byte[] tssVerificationKey,
-            byte[] wrapsVerificationKey);
+            byte[] compressedProof, byte[] genesisAddressBookHash, byte[] tssVerificationKey);
 
     /** Check if the sum of weights doesn't exceed MAX_SUM_OF_WEIGHTS. */
     private static boolean validateWeightsSum(final long weights[]) {
@@ -542,7 +543,7 @@ public class WRAPSLibraryBridge {
 
     private static boolean validateSchnorrPublicKeys(final byte[][] schnorrPublicKeys) {
         for (int i = 0; i < schnorrPublicKeys.length; i++) {
-            if (schnorrPublicKeys[i] == null || schnorrPublicKeys[i].length != 192) {
+            if (schnorrPublicKeys[i] == null || schnorrPublicKeys[i].length != 128) {
                 return false;
             }
         }

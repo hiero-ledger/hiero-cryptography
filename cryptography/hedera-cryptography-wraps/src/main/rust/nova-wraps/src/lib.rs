@@ -88,6 +88,8 @@ mod schnorr;
 mod utils;
 mod verification_key;
 mod wraps;
+mod jni_util;
+mod jni_wraps;
 
 #[doc(hidden)]
 pub use circuit::RotationCircuit;

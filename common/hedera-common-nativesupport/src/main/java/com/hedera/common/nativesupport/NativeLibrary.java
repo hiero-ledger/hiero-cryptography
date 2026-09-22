@@ -91,13 +91,11 @@ public class NativeLibrary extends NativeBinary {
     }
 
     /**
-     * Override the NativeBinary.extractUnchecked() to also System.load() the extracted library.
+     * Call System.load() to load the extracted library.
      */
     @SuppressWarnings("restricted")
     @Override
-    protected Path extractUnchecked(final Class<?> c) {
-        final Path path = super.extractUnchecked(c);
+    protected void postExtract(final Path path) {
         System.load(path.toAbsolutePath().toString());
-        return path;
     }
 }

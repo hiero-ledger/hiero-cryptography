@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 /// Utility class to write DER-encoded values.
 public class DerWriter {
     public static final byte TAG_INTEGER = 0x02;
+    public static final byte TAG_BIT_STRING = 0x03;
     public static final byte TAG_NULL = 0x05;
     public static final byte TAG_OBJECT_ID = 0x06;
     public static final byte TAG_UTF_8_STRING = 0x0C;
@@ -88,5 +89,14 @@ public class DerWriter {
         final byte[] bytes = formatter.format(instant).getBytes(StandardCharsets.ISO_8859_1);
 
         put(os, tag, bytes);
+    }
+
+    /// Write a DER bit string.
+    public static void putBitString(DerOutputStream os, byte[] bits) {
+        os.write(TAG_BIT_STRING);
+        putLength(os, bits.length + 1);
+        // The final octet has no padding because we use entire bytes, so put zero:
+        os.write(0);
+        os.writeBytes(bits);
     }
 }

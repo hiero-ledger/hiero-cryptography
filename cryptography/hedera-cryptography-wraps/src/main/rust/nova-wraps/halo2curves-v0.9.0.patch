@@ -1,0 +1,386 @@
+diff --git a/.github/release-pr-template.ejs b/.github/release-pr-template.ejs
+deleted file mode 100644
+index 515c86ed9e34ec3cddf539d15a57e1a1789c81a5..0000000000000000000000000000000000000000
+--- a/.github/release-pr-template.ejs
++++ /dev/null
+@@ -1,13 +0,0 @@
+-This is a release PR for version **<%= version.actual %>**<%
+-    if (version.actual != version.desired) {
+-%> (performing a <%= version.desired %> bump).<%
+-    } else {
+-%>.<%
+-    }
+-%>
+-
+-You will still need to manually publish the cargo crate:
+-
+-```
+-$ make VERSION=<%= version.actual %> release
+-```
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+deleted file mode 100644
+index 7b21bfc7b7a1a0b2696d578cb3a8432ce52d9a46..0000000000000000000000000000000000000000
+--- a/.github/workflows/ci.yml
++++ /dev/null
+@@ -1,171 +0,0 @@
+-name: CI Check
+-on:
+-  merge_group:
+-  pull_request:
+-  push:
+-    branches:
+-      - main
+-env:
+-  CARGO_TERM_COLOR: always
+-  # Disable incremental compilation.
+-  #
+-  # Incremental compilation is useful as part of an edit-build-test-edit cycle,
+-  # as it lets the compiler avoid recompiling code that hasn't changed. However,
+-  # on CI, we're not making small edits; we're almost always building the entire
+-  # project from scratch. Thus, incremental compilation on CI actually
+-  # introduces *additional* overhead to support making future builds
+-  # faster...but no future builds will ever occur in any given CI environment.
+-  #
+-  # See https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
+-  # for details.
+-  CARGO_INCREMENTAL: 0
+-  # Allow more retries for network requests in cargo (downloading crates) and
+-  # rustup (installing toolchains). This should help to reduce flaky CI failures
+-  # from transient network timeouts or other issues.
+-  CARGO_NET_RETRY: 10
+-  RUSTUP_MAX_RETRIES: 10
+-  # Don't emit giant backtraces in the CI logs.
+-  RUST_BACKTRACE: short
+-
+-# Jobs launched for a PR event cancel the ongoing one for the same workflow + PR,
+-# Only retries (of the same run) for a Push event cancel the prior one.
+-concurrency:
+-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+-  cancel-in-progress: true
+-
+-jobs:
+-  no_std:
+-    if: github.event.pull_request.draft == false
+-    name: no_std-compatibility
+-    runs-on: ubuntu-latest
+-    strategy:
+-      matrix:
+-        feature: [default, bn256-table, derive_serde, ""]
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-
+-      - name: Download no_std target
+-        run: rustup target add thumbv7em-none-eabi
+-
+-      #  Check if build passes on `thumbv7em-none-eabi` no_std target with and without specific features (default, bn256-table and derive_serde)
+-      - name: Build
+-        # Script that checks if feature is empty or script should be ran with feature
+-        run: |
+-          if [ -z "${{ matrix.feature }}" ]; then
+-            cargo build --release --target thumbv7em-none-eabi --no-default-features
+-          else
+-            cargo build --release --target thumbv7em-none-eabi --no-default-features --features ${{ matrix.feature }}
+-          fi
+-  compat:
+-    if: github.event.pull_request.draft == false
+-    name: Wasm-compatibility
+-    runs-on: ubuntu-latest
+-    strategy:
+-      matrix:
+-        target:
+-          - wasm32-unknown-unknown
+-          - wasm32-wasi
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-
+-      - name: Download WASM targets
+-        run: rustup target add "${{ matrix.target }}"
+-      # We run WASM build (for tests) which compiles the lib allowig us to have
+-      # `getrandom` as a dev-dependency.
+-      - name: Build
+-        run: cargo build --tests --release --features "bn256-table derive_serde" --target "${{ matrix.target }}"
+-  test:
+-    if: github.event.pull_request.draft == false
+-    name: Test
+-    runs-on: ubuntu-latest
+-    strategy:
+-      matrix:
+-        include:
+-          - feature: default
+-          - feature: bn256-table
+-          - feature: derive_serde
+-          - feature: asm
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-      # use the more efficient nextest
+-      - uses: taiki-e/install-action@nextest
+-      - uses: Swatinem/rust-cache@v2
+-      - name: Build
+-        # This build will be reused by nextest,
+-        # and also checks (--all-targets) that benches don't bit-rot
+-        run: cargo build --release --all-targets --no-default-features --features "${{ matrix.feature }}"
+-      - name: Test
+-        run: |
+-          cargo nextest run --profile ci --release --workspace --no-default-features --features "${{ matrix.feature }}"
+-      - name: Doctests # nextest does not support doc tests
+-        run: |
+-          cargo test --doc
+-
+-  fmt:
+-    if: github.event.pull_request.draft == false
+-    name: Rustfmt
+-    timeout-minutes: 30
+-    runs-on: ubuntu-latest
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-      - uses: Swatinem/rust-cache@v2
+-      - run: rustup component add rustfmt
+-      - uses: actions-rs/cargo@v1
+-        with:
+-          command: fmt
+-          args: --all -- --check
+-
+-  clippy:
+-    if: github.event.pull_request.draft == false
+-    name: Clippy lint checks
+-    runs-on: ubuntu-latest
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-        with:
+-          components: clippy
+-      - uses: Swatinem/rust-cache@v2
+-      - name: Run clippy
+-        uses: actions-rs/cargo@v1
+-        with:
+-          command: clippy
+-          args: --verbose --release --tests --all-features
+-
+-  typos:
+-    name: Spell Check with Typos
+-    runs-on: ubuntu-latest
+-    steps:
+-      - uses: actions/checkout@v4
+-      - name: Use typos with config file
+-        uses: crate-ci/typos@master
+-        with:
+-          config: .config/typos.toml
+-
+-  bench:
+-    if: github.event.pull_request.draft == false
+-    name: Bench
+-    runs-on: ubuntu-latest
+-    strategy:
+-      matrix:
+-        include:
+-          - feature: default
+-          - feature: asm
+-          - feature: bn256-table
+-    steps:
+-      - uses: actions/checkout@v2
+-      - uses: actions-rs/toolchain@v1
+-      - uses: Swatinem/rust-cache@v2
+-      - name: Bench arithmetic
+-        uses: actions-rs/cargo@v1
+-        with:
+-          command: test
+-          args: --profile bench test_field -- --nocapture
+-      - name: Bench assembly arithmetic
+-        uses: actions-rs/cargo@v1
+-        with:
+-          command: test
+-          args: --profile bench test_field --features ${{ matrix.feature }} -- --nocapture
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+deleted file mode 100644
+index ff41bab5634230342a27d300c2b9db663fcb92e6..0000000000000000000000000000000000000000
+--- a/.github/workflows/release.yml
++++ /dev/null
+@@ -1,59 +0,0 @@
+-name: Open a release PR
+-on:
+-  workflow_dispatch:
+-    inputs:
+-      version:
+-        description: Version to release
+-        required: true
+-        type: string
+-env:
+-  RUSTUP_MAX_RETRIES: 10
+-
+-jobs:
+-  make-release-pr:
+-    runs-on: ubuntu-latest
+-    strategy:
+-      matrix:
+-        package: [halo2curves]
+-    steps:
+-      - name: Checkout code
+-        uses: actions/checkout@v4
+-      - uses: actions-rs/toolchain@v1
+-        with:
+-            profile: minimal
+-
+-      - name: Get current version
+-        id: get-version
+-        run: |
+-          echo "CURRENT_VERSION=$(./script/get_current_version.sh ${{ matrix.package }})" >> $GITHUB_ENV
+-
+-      - name: Check version
+-        id: version-check
+-        run: |
+-          IFS='.' read -ra INPUT_VERSION <<< "${{ github.event.inputs.version }}"
+-          IFS='.' read -ra CURRENT_VERSION <<< "${{ env.CURRENT_VERSION }}"
+-
+-          for i in "${!INPUT_VERSION[@]}"; do
+-            if (( INPUT_VERSION[i] > CURRENT_VERSION[i] )); then
+-              echo "Input version is larger than current version. Proceeding..."
+-              exit 0
+-            elif (( INPUT_VERSION[i] < CURRENT_VERSION[i] )); then
+-              echo "Input version is not larger than current version. Failing..."
+-              exit 1
+-            fi
+-          done
+-          
+-          echo "Input version is equal to current version. Failing..."
+-          exit 1
+-
+-      - name: Install cargo-release
+-        uses: taiki-e/install-action@v2
+-        with:
+-          tool: cargo-release
+-          
+-      - uses: cargo-bins/release-pr@v2
+-        with:
+-            pr-template-file: .github/release-pr-template.ejs
+-            github-token: ${{ secrets.GITHUB_TOKEN }}
+-            version: ${{ inputs.version }}
+-            crate-release-all: true
+diff --git a/Cargo.toml b/Cargo.toml
+index e82c13607fc7b7bea4c451c3cc39963570bad887..b06e691caca1e1894a698e7d609badc0c8964de5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,6 +9,14 @@ readme = "README.md"
+ description = "Elliptic curve implementations and wrappers for halo2 library"
+ rust-version = "1.74.0"
+ 
++# Consumed as a `[patch.crates-io]` path dependency, which means cargo does not pass
++# `--cap-lints=allow` the way it does for a registry source, and 13 pre-existing upstream
++# warnings replay on every downstream build. Allow them here without changing the
++# upstream code that produces them.
++[lints.rust]
++dead_code = "allow"
++unused = "allow"
++
+ [dev-dependencies]
+ criterion = { version = "0.3", features = ["html_reports"] }
+ ark-std = { version = "0.3" }
+@@ -58,7 +66,9 @@ serde_arrays = { version = "0.2.0", optional = true }
+ 
+ [features]
+ default = ["bits"]
+-asm = ["halo2derive/asm", "std"]
++# Compatibility with Nova's explicit x86_64 request. Keep portable field arithmetic
++# by leaving halo2derive/asm disabled, while preserving the std functionality.
++asm = ["std"]
+ bits = ["ff/bits"]
+ bn256-table = []
+ derive_serde = ["serde/derive", "serde_arrays", "hex"]
+diff --git a/README.md b/README.md
+index cebfd3000f577742a1c46828b7c9be225acaa708..472b6e189630e2160fbd48b13d959bdc69a2f9e8 100644
+--- a/README.md
++++ b/README.md
+@@ -20,7 +20,7 @@ The implementations were originally ported from [matterlabs/pairing](https://git
+ ## Controlling parallelism
+ 
+ `halo2curves` currently uses [rayon](https://github.com/rayon-rs/rayon) for parallel
+-computation. 
++computation.
+ 
+ The `RAYON_NUM_THREADS` environment variable can be used to set the number of
+ threads.
+@@ -28,7 +28,7 @@ threads.
+ When compiling to WASM-targets, notice that since version `1.7`, `rayon` will fallback automatically (with no need to handle features) to require `getrandom` in order to be able to work.
+ For more info related to WASM-compilation.
+ 
+-See: [Rayon: Usage with WebAssembly](https://github.com/rayon-rs/rayon#usage-with-webassembly) for more info.  
++See: [Rayon: Usage with WebAssembly](https://github.com/rayon-rs/rayon#usage-with-webassembly) for more info.
+ 
+ ## Benchmarks
+ 
+@@ -44,7 +44,6 @@ or with assembly optimizations:
+ $ cargo test --profile bench test_field --features asm -- --nocapture
+ ```
+ 
+-
+ ## Additional Features
+ 
+ 1. **Derivation of Serialize/Deserialize**: The library supports Serde's `Serialize` and `Deserialize` traits for field and group elements, making it easier to integrate curve operations into serialization-dependent workflows.
+diff --git a/build.rs b/build.rs
+index ad1aa17435a0f082cb814303f703f08c4a4b98fe..ce69b45f84ada7e547bd86070a347ff3fbf4db02 100644
+--- a/build.rs
++++ b/build.rs
+@@ -1,9 +1,4 @@
+ fn main() {
+-    #[cfg(feature = "asm")]
+-    if std::env::consts::ARCH != "x86_64" {
+-        eprintln!("Currently feature `asm` can only be enabled on x86_64 arch.");
+-        std::process::exit(1);
+-    }
+     #[cfg(feature = "bn256-table")]
+     {
+         if std::path::Path::new("src/bn256/fr/table.rs").exists() {
+diff --git a/rust-toolchain b/rust-toolchain
+deleted file mode 100644
+index dc87e8af82f694a08226567653747aa82bf3161a..0000000000000000000000000000000000000000
+--- a/rust-toolchain
++++ /dev/null
+@@ -1 +0,0 @@
+-1.74.0
+diff --git a/src/bn256/curve.rs b/src/bn256/curve.rs
+index 585162098f402e576993e3fca7666a9e556ee72d..c59f27e7591c53e937f3208e5db808a17fda3d9a 100644
+--- a/src/bn256/curve.rs
++++ b/src/bn256/curve.rs
+@@ -165,9 +165,6 @@ fn exp_by_x(g2: &G2) -> G2 {
+     let x = super::BN_X;
+ 
+     (0..62).rev().fold(*g2, |mut acc, i| {
+-        #[cfg(feature = "std")]
+-        println!("{}", ((x >> i) & 1) == 1);
+-
+         acc = acc.double();
+         (((x >> i) & 1) == 1).then(|| acc += g2);
+         acc
+diff --git a/src/derive/field/tower.rs b/src/derive/field/tower.rs
+index 3bcdb5ea7f7d593e7249c7d9817ed6a3db4dbb95..f45a1e3a2c4a84f59f1f7d478351693e1d22c30b 100644
+--- a/src/derive/field/tower.rs
++++ b/src/derive/field/tower.rs
+@@ -41,13 +41,9 @@ macro_rules! impl_tower2 {
+             pub fn from_bytes(bytes: &[u8; $base::SIZE * 2]) -> CtOption<$field> {
+                 let c0 = $base::from_bytes(bytes[0..$base::SIZE].try_into().unwrap());
+                 let c1 = $base::from_bytes(bytes[$base::SIZE..$base::SIZE * 2].try_into().unwrap());
+-                CtOption::new(
+-                    $field {
+-                        c0: c0.unwrap(),
+-                        c1: c1.unwrap(),
+-                    },
+-                    c0.is_some() & c1.is_some(),
+-                )
++                // A noncanonical component must return None, not panic while
++                // unwrapping the components before their validity is checked.
++                c0.and_then(|c0| c1.map(|c1| $field { c0, c1 }))
+             }
+ 
+             /// Converts an element of `$base` into a byte representation in
+@@ -132,7 +128,7 @@ macro_rules! impl_tower2 {
+                 let c1: <$base as PrimeField>::Repr = c1.into();
+                 let c1 = $base::from_repr(c1);
+ 
+-                CtOption::new($field::new(c0.unwrap(), c1.unwrap()), Choice::from(1))
++                c0.and_then(|c0| c1.map(|c1| $field { c0, c1 }))
+             }
+ 
+             fn to_repr(&self) -> Self::Repr {

@@ -42,7 +42,7 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
         let option_params = PUBLIC_PARAMS.get_or_init(|| {
             match WRAPS::load_public_params(&rust_path) {
                 Ok(val) => Some(val),
-                Err(e) => None
+                Err(_e) => None
             }
         });
 

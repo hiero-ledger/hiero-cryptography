@@ -7,6 +7,14 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+// Every JNI entry point wraps its body in catch_unwind so a panic becomes a false or null
+// return instead of killing the JVM. Those guards are inert under panic = "abort", and the
+// setting lives in one line of Cargo.toml, so fail the build rather than ship them silently
+// disabled. This cannot be a test: cargo forces unwind for the test profile regardless of
+// what release is set to.
+#[cfg(panic = "abort")]
+compile_error!("WRAPS JNI entry points rely on catch_unwind, which is inert under panic=abort");
+
 mod signature;
 mod random_oracle;
 mod utils;
@@ -21,7 +29,7 @@ use rand_chacha::rand_core::SeedableRng;
 
 /********************************* Imports *********************************/
 
-use ark_ec::{PrimeGroup, CurveGroup};
+use ark_ec::{AffineRepr, PrimeGroup, CurveGroup};
 use ark_ff::{field_hashers::{DefaultFieldHasher, HashToField}, BigInteger, PrimeField, ToConstraintField};
 use ark_r1cs_std::{
     alloc::{AllocVar, AllocationMode},
@@ -139,6 +147,18 @@ pub const ENTROPY_SIZE: usize = 32; // size of the seed for key generation
 
 /// We can only support address books up to this size.
 const MAX_AB_SIZE: usize = 128;
+
+/// Width of the IVC folding state: the address book hash and the hinTS vk hash.
+const IVC_STATE_LEN: usize = 2;
+
+/// Number of commitments Nova carries per instance, i.e. what `get_commitments` returns.
+const IVC_COMMITMENT_COUNT: usize = 2;
+
+// Not a tunable knob. The step function returns a two element vector literally, and the
+// genesis initial_state is a two element literal, so raising this alone would produce a
+// circuit whose declared state width disagrees with the state it actually folds.
+const _: () = assert!(IVC_STATE_LEN == 2);
+const _: () = assert!(IVC_COMMITMENT_COUNT == 2);
 
 type PairingCurve = ark_bn254::Bn254;
 type G1 = ark_bn254::G1Projective;
@@ -264,7 +284,7 @@ impl<const K: usize> FCircuit<Fr> for TSSFCircuit<K> {
 
     fn state_len(&self) -> usize {
         // The folding state tracks the current address-book hash and hints hash.
-        2
+        IVC_STATE_LEN
     }
 
     /// generates the constraints for the step of F for the given z_i
@@ -492,6 +512,14 @@ fn verify_addressbook(ab: &AddressBook) -> Result<bool, WRAPSError> {
     for ((pk, pok), weight, _node_id) in ab.iter() {
         if *pk == sentinel {
             continue;
+        }
+
+        // The proof of knowledge below is trivially satisfiable for the identity: its equation
+        // multiplies the public key by the challenge, so that term vanishes at sk = 0 and any
+        // (commitment, response) pair with commitment = g^response verifies. An identity entry
+        // would then carry weight into the aggregate without contributing to the aggregate key.
+        if pk.is_zero() {
+            return Ok(false);
         }
 
         // check range [0, 2^64) of weight
@@ -981,6 +1009,14 @@ impl WRAPS {
 
         let (bitvector, signature) = multisignature;
 
+        // The zips below stop at the shorter of the two, so a bit past the end of the book is
+        // silently dropped here while the circuit, which always sees 128 padded entries, would
+        // select the padding entry it points at. Refuse the input rather than read it differently
+        // from the circuit. No effect on a padded book, where every bit has an entry.
+        if bitvector.iter().skip(address_book.len()).any(|&is_present| is_present) {
+            return Ok(false);
+        }
+
         let public_keys: Vec<SchnorrPubKey> = address_book.iter()
             .zip(bitvector.iter())
             .filter_map(|(abe, &is_present)| if is_present { Some(abe.0.0.clone()) } else { None })
@@ -1185,8 +1221,13 @@ impl WRAPS {
         // Build the message the committee signed to authorize the rotation.
         let ab_rotation_message: Vec<u8> = Self::compute_rotation_message(&padded_next_ab, hints_vk.as_ref())?;
 
+        // Verify against the padded book, not `prev_ab`. The circuit consumes the padded book and
+        // the full 128-bit bitvector, so verifying against the unpadded one leaves the two reading
+        // the same signature differently: bits at or past `prev_ab.len()` are silently dropped
+        // here but select padding entries in-circuit. Identical result for a well-formed
+        // bitvector, since padding entries are never selected.
         let sig_verification = Self::verify_signature(
-            prev_ab,
+            &padded_prev_ab,
             &ab_rotation_message,
             multi_signature
         )?;
@@ -1323,6 +1364,20 @@ impl WRAPS {
         let compressed_proof = ProofData::deserialize_compressed(proof_serialized.as_slice())
             .map_err(|_| WRAPSError::CryptographyError)?;
 
+        // The proof only pins the total length of these four vectors, not how it is split
+        // between them, and they are indexed below and inside the decider. Exact lengths:
+        // a proof re-split as z_0 = [a], z_i = [b, c, d] still satisfies the SNARK check
+        // but makes z_i[1] read the wrong field.
+        // Not redundant with Groth16's own public-input length check: that runs after the
+        // decider has already indexed these vectors, so it cannot protect them.
+        if compressed_proof.z_0.len() != IVC_STATE_LEN
+            || compressed_proof.z_i.len() != IVC_STATE_LEN
+            || compressed_proof.U_i_commitments.len() != IVC_COMMITMENT_COUNT
+            || compressed_proof.u_i_commitments.len() != IVC_COMMITMENT_COUNT
+        {
+            return Err(WRAPSError::CryptographyError);
+        }
+
         // Does the i-th state of IVC have the expected hints_vk?
         let hints_vk_verified = compressed_proof.z_i[1] == hash_hints_vk(hints_vk.as_ref())?;
         // Does the initial state of IVC have the expected genesis ledger ID?
@@ -1351,6 +1406,16 @@ mod tests {
 
     use super::*;
     use std::{env, path::PathBuf};
+
+    /// Deserialization must size a collection from what it actually reads, not from the
+    /// declared length prefix, which is untrusted and unbounded. This pins the behaviour
+    /// rather than a version: the pinned revision does not pre-size, a released one does,
+    /// so a dependency change could alter it with no change here. Don't relax this test.
+    #[test]
+    fn test_vec_deserialization_does_not_preallocate() {
+        let huge_length_prefix = (1u64 << 40).to_le_bytes();
+        assert!(Vec::<Fr>::deserialize_compressed(huge_length_prefix.as_slice()).is_err());
+    }
 
     fn create_new_addressbook() -> (AddressBook, Keys) {
         let rng = &mut thread_rng();
@@ -1736,6 +1801,52 @@ mod tests {
         assert!(verify_addressbook(&ab).unwrap());
     }
 
+    /// The proof of knowledge cannot speak for the identity: its equation multiplies the public
+    /// key by the challenge, so at sk = 0 that term drops out and any commitment = g^response
+    /// satisfies it. Such an entry would carry weight into the aggregate while contributing
+    /// nothing to the aggregate key, so the address book has to reject it outright.
+    #[test]
+    fn verify_addressbook_rejects_identity_key() {
+        let rng = &mut thread_rng();
+
+        // sanity: an ordinary key is accepted in this position
+        let honest: AddressBook = vec![(WRAPS::keygen(rng.gen()).unwrap().1, Fr::from(500u64), Fr::from(0u64))];
+        assert!(verify_addressbook(&honest).unwrap());
+
+        // forge a proof of knowledge for the identity: pick any response, set the commitment to
+        // g^response, and take the challenge the random oracle gives for that pair
+        let g = JubJub::generator();
+        let identity = <JubJub as CurveGroup>::Affine::zero();
+        let response = JubJubFr::from(12345u64);
+        let commitment = (g * response).into_affine();
+        let challenge = proof_of_knowledge_random_oracle(g, identity, commitment).unwrap();
+        let forged = SchnorrPoK { commitment, challenge, response };
+
+        // the forged proof does satisfy the equation -- that is the whole problem
+        assert!(verify_proof_of_knowledge(&forged, &identity).unwrap());
+
+        let bad: AddressBook = vec![((identity, forged), Fr::from(500u64), Fr::from(0u64))];
+        assert!(!verify_addressbook(&bad).unwrap());
+    }
+
+    /// `construct_wraps_proof` verifies the multisignature against the *padded* book, so the
+    /// identity guard above now runs over padding entries too. Padding is a real keypair derived
+    /// from an all-zero seed, not the identity -- pin that, since the guard would otherwise reject
+    /// every padded book.
+    #[test]
+    fn padded_addressbook_still_verifies() {
+        let dummy = WRAPS::keygen([0; 32]).unwrap();
+        assert!(!dummy.1.0.is_zero(), "padding key must not be the identity");
+
+        let rng = &mut thread_rng();
+        let ab: AddressBook = (0..3)
+            .map(|i| (WRAPS::keygen(rng.gen()).unwrap().1, Fr::from(500u64), Fr::from(i as u64)))
+            .collect();
+        let padded = pad_addressbook(&ab).unwrap();
+        assert_eq!(padded.len(), MAX_AB_SIZE);
+        assert!(verify_addressbook(&padded).unwrap());
+    }
+
     #[test]
     fn sentinel_key_attested_pok_verifies_and_is_deterministic() {
         use ark_ec::AffineRepr;
@@ -1755,6 +1866,26 @@ mod tests {
         assert_eq!(pok1.commitment, pok2.commitment);
         assert_eq!(pok1.challenge, pok2.challenge);
         assert_eq!(pok1.response, pok2.response);
+    }
+
+    /// A bit past the end of the book is dropped by the zips in `verify_signature` but selects a
+    /// padding entry in the circuit, which always sees 128 entries. That leaves the two reading
+    /// the same signature differently, so the input has to be refused rather than reinterpreted.
+    #[test]
+    fn verify_signature_rejects_a_bit_past_the_address_book() {
+        let (ab, keys) = create_new_addressbook();
+        assert!(ab.len() < MAX_AB_SIZE, "test needs room past the end of the book");
+
+        let bitvector = sufficient_bitvector(&ab);
+        let message: &[u8] = b"bit past the end of the book";
+        let multi_signature = threshold_sign(message, &ab, &keys, &bitvector);
+
+        // sanity: the signature verifies exactly as produced
+        assert!(WRAPS::verify_signature(&ab, message, &multi_signature).unwrap());
+
+        let mut tampered = multi_signature.clone();
+        tampered.0[ab.len()] = true;
+        assert!(!WRAPS::verify_signature(&ab, message, &tampered).unwrap());
     }
 
     #[test]
@@ -1785,3 +1916,4 @@ mod tests {
         );
     }
 }
+

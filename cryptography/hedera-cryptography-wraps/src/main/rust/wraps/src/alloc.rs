@@ -81,10 +81,20 @@ unsafe impl GlobalAlloc for MemmapAllocator {
             // Try the map
             let num_of_blocks = (layout.size() + BLOCK_SIZE_BYTES - 1) / BLOCK_SIZE_BYTES;
 
-            // lock() will block until the mutex is available, so it's safe to unwrap().
-            // If the lock indeed fails and the Result is an Err then we're already in a bigger trouble.
+            // lock() blocks until the mutex is available; the only way it returns Err is
+            // poisoning, i.e. a panic while the guard was held. Don't unwrap: in a global
+            // allocator that panics again inside the panic machinery, which double panics
+            // into an abort no catch_unwind can stop. Don't trust the bitmap either, since
+            // a poisoned lock means it may be mid-update. Reporting NUM_OF_BLOCKS is how
+            // this function already signals "no space", so a poisoned lock takes the same
+            // path as a full bitmap and falls through to the system allocator below.
             // Also, put inside {} to release the lock ASAP.
-            let index = { self.bit_map.lock().unwrap().alloc(num_of_blocks) };
+            let index = {
+                match self.bit_map.lock() {
+                    Ok(mut bit_map) => bit_map.alloc(num_of_blocks),
+                    Err(_) => NUM_OF_BLOCKS,
+                }
+            };
             if index < NUM_OF_BLOCKS {
                 // unwrap() is safe because we checked is_some() above:
                 return self.file_map.get_map().unwrap().as_mut_ptr().add(index * BLOCK_SIZE_BYTES)
@@ -111,9 +121,14 @@ unsafe impl GlobalAlloc for MemmapAllocator {
                 // and we happen to build this code on Windows. So unfortunately, we cannot use this:
                 // let _ = self.file_map.get_map().unwrap().unchecked_advise_range(UncheckedAdvice::DontNeed, offset, layout.size());
 
-                // lock() will block until the mutex is available, so it's safe to unwrap().
-                // If the lock indeed fails and the Result is an Err then we're already in a bigger trouble.
-                self.bit_map.lock().unwrap().dealloc(index, num_of_blocks);
+                // lock() blocks until the mutex is available; Err means poisoning, so the
+                // bitmap may be mid-update. Unlike alloc() we cannot fall back to the system
+                // allocator, because this pointer belongs to the swap. Leave the block marked
+                // as used instead: leaking swap space is the safe direction, whereas freeing
+                // against a bitmap we don't trust could hand the same block out twice.
+                if let Ok(mut bit_map) = self.bit_map.lock() {
+                    bit_map.dealloc(index, num_of_blocks);
+                }
                 return;
             }
         }

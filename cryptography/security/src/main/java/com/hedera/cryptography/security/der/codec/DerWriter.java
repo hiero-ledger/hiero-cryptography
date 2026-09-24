@@ -19,6 +19,7 @@ public class DerWriter {
     public static final byte TAG_GENERALIZED_TIME = 0x18;
     public static final byte TAG_SEQUENCE = 0x30;
     public static final byte TAG_SET = 0x31;
+    public static final byte TAG_TBS_CERTIFICATE = (byte) 0xa0;
 
     /// Write a (sometimes) length-prefixed varint number.
     public static void putLength(DerOutputStream os, int len) {
@@ -55,6 +56,13 @@ public class DerWriter {
         byte[] buf = i.toByteArray();
         putLength(os, buf.length);
         os.write(buf, 0, buf.length);
+    }
+
+    /// Write a single byte TAG_INTEGER.
+    public static void putInteger(DerOutputStream os, byte i) {
+        os.write(TAG_INTEGER);
+        putLength(os, 1);
+        os.write(i & 0xFF);
     }
 
     /// Write a byte array.

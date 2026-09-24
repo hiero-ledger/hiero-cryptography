@@ -69,7 +69,8 @@ public class X509CertificateInfoTest {
         X500Name bcIssuer = new X500Name("CN=signer.com, O=The Signer, L=Singapore, C=SG");
 
         TBSCertificate tbsCertificate = new TBSCertificate(
-                null,
+                // Specify 2 which is the certificate v3. This is what we support.
+                new ASN1Integer(2),
                 new ASN1Integer(SERIAL_NUMBER),
                 finder.find(ALGORITHM),
                 bcIssuer,

@@ -3,14 +3,15 @@
 Address-book rotation attested by a weighted Schnorr multisignature, folded with
 [Nova](https://github.com/microsoft/Nova).
 
+Incrementally verifiable computation (IVC) lets a prover extend a proof with each
+computation step so that the resulting proof attests to the correctness of every
+step so far (see the [Nova paper](https://eprint.iacr.org/2021/370)).
+
 A committee is an *address book*: up to `MAX_AB_SIZE` entries of
 `(node id, (public key, proof of knowledge), weight)`. Rotating the committee means
-producing a new address book that the outgoing one has jointly signed, and the IVC
-carries a proof that every rotation since genesis was authorised that way — without a
+producing a new address book that the outgoing one has jointly signed, and IVC
+maintains a proof that every rotation since genesis was authorised that way — without a
 verifier ever seeing an intermediate book or signature.
-
-Serialized entries use this field order; books encoded with the previous order must
-be re-encoded.
 
 Nonidentity public keys must be unique within an address book, regardless of node ID,
 weight, or proof of possession. Sentinel keys may repeat. Selected sentinel seats

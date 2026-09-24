@@ -59,6 +59,11 @@ val prepareHalo2curves =
 
 tasks.withType<CargoBuildTask>().configureEach { dependsOn(prepareHalo2curves) }
 
+// The following two are to please Gradle:
+tasks.named("spotlessJavaInfoFiles").configure { dependsOn(prepareHalo2curves) }
+
+tasks.named("spotlessRust").configure { dependsOn(prepareHalo2curves) }
+
 testModuleInfo { requires("org.junit.jupiter.api") }
 
 jmhModuleInfo {

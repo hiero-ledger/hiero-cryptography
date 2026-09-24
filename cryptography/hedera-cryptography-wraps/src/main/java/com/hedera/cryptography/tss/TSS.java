@@ -11,7 +11,7 @@ import java.util.Arrays;
 public final class TSS {
 
     private static final int HINTS_VERIFICATION_KEY_LENGTH = 1096;
-    private static final int HINTS_SIGNATURE_LENGTH = 1632;
+
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 704;
     private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 192;
 
@@ -47,8 +47,9 @@ public final class TSS {
             throw new IllegalArgumentException(
                     "`hintsVerificationKey` must have a length of " + HINTS_VERIFICATION_KEY_LENGTH);
         }
-        if (hintsSignature == null || hintsSignature.length != HINTS_SIGNATURE_LENGTH) {
-            throw new IllegalArgumentException("`hintsSignature` must have a length of " + HINTS_SIGNATURE_LENGTH);
+        if (hintsSignature == null || hintsSignature.length != HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES) {
+            throw new IllegalArgumentException(
+                    "`hintsSignature` must have a length of " + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES);
         }
         if (abProof == null
                 || (abProof.length != COMPRESSED_WRAPS_PROOF_LENGTH
@@ -125,16 +126,18 @@ public final class TSS {
             throw new IllegalArgumentException("`ledgerId` must be a 32 bytes array, instead got "
                     + (ledgerId == null ? null : (ledgerId.length + "")));
         }
-        if (tssSignature == null || tssSignature.length <= HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH) {
+        if (tssSignature == null
+                || tssSignature.length
+                        <= HINTS_VERIFICATION_KEY_LENGTH + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES) {
             throw new IllegalArgumentException("`tssSignature` is too short. Expected more than "
-                    + (HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH)
+                    + (HINTS_VERIFICATION_KEY_LENGTH + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES)
                     + " bytes, instead got " + (tssSignature == null ? null : (tssSignature.length + "")));
         }
-        if ((tssSignature.length - HINTS_VERIFICATION_KEY_LENGTH - HINTS_SIGNATURE_LENGTH)
+        if ((tssSignature.length - HINTS_VERIFICATION_KEY_LENGTH - HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES)
                 > Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH)) {
             throw new IllegalArgumentException("`tssSignature` is too long. Expected no more than "
                     + (HINTS_VERIFICATION_KEY_LENGTH
-                            + HINTS_SIGNATURE_LENGTH
+                            + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES
                             + Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH))
                     + " bytes, instead got " + tssSignature.length);
         }
@@ -145,7 +148,9 @@ public final class TSS {
         // Then check if the `ledgerId` verifies:
         final byte[] hintsVerificationKey = Arrays.copyOfRange(tssSignature, 0, HINTS_VERIFICATION_KEY_LENGTH);
         final byte[] abProof = Arrays.copyOfRange(
-                tssSignature, HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH, tssSignature.length);
+                tssSignature,
+                HINTS_VERIFICATION_KEY_LENGTH + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES,
+                tssSignature.length);
         if (abProof.length == COMPRESSED_WRAPS_PROOF_LENGTH) {
             if (!WRAPS.verifyCompressedProof(abProof, ledgerId, hintsVerificationKey)) {
                 return false;
@@ -179,7 +184,9 @@ public final class TSS {
 
         // Finally check if the `message` verifies via hinTS:
         final byte[] hintsSignature = Arrays.copyOfRange(
-                tssSignature, HINTS_VERIFICATION_KEY_LENGTH, HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH);
+                tssSignature,
+                HINTS_VERIFICATION_KEY_LENGTH,
+                HINTS_VERIFICATION_KEY_LENGTH + HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES);
         return HINTS.verifyAggregate(hintsSignature, message, hintsVerificationKey);
     }
 }

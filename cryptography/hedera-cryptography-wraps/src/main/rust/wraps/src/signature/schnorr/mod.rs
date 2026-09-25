@@ -145,8 +145,16 @@ pub type ThresholdSchnorrMessage3<C> = Signature<C>;
 
 impl<C: CurveGroup + Hash> ThresholdSchnorr<C> where C::ScalarField: PrimeField,
 {
-    fn get_pseudorandom_scalar(entropy: [u8; 32]) -> C::ScalarField {
-        let mut csprng = ark_std::rand::rngs::StdRng::from_seed(entropy);
+    fn get_pseudorandom_scalar(sk: &SecretKey<C>, entropy: [u8; 32], message: &[u8]) -> C::ScalarField {
+        // RFC-6979-style binding: derive the nonce from the key and message too, not entropy alone.
+        // The digest only reseeds the sampler; it is not reduced into the scalar directly, because
+        // truncating a digest below the field size would bias the nonce and leak sk via lattice/HNP.
+        let mut hash_input = Vec::new();
+        hash_input.extend_from_slice(&serialize(sk));
+        hash_input.extend_from_slice(&entropy);
+        hash_input.extend_from_slice(message);
+        let seed: [u8; 32] = Blake2s::digest(&hash_input).into();
+        let mut csprng = ark_std::rand::rngs::StdRng::from_seed(seed);
         C::ScalarField::rand(&mut csprng)
     }
 
@@ -185,8 +193,10 @@ impl<C: CurveGroup + Hash> ThresholdSchnorr<C> where C::ScalarField: PrimeField,
     pub fn sign_round1(
         parameters: &Parameters<C>,
         protocol_instance_entropy: [u8; 32],
+        message_to_sign: &[u8],
+        sk: &SecretKey<C>,
     ) -> Result<ThresholdSchnorrMessage1, Error> {
-        let random_scalar = Self::get_pseudorandom_scalar(protocol_instance_entropy);
+        let random_scalar = Self::get_pseudorandom_scalar(sk, protocol_instance_entropy, message_to_sign);
 
         let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
         let hash_commitment: [u8; 32] = Blake2s::digest(&serialize(&prover_commitment)).into();
@@ -197,9 +207,11 @@ impl<C: CurveGroup + Hash> ThresholdSchnorr<C> where C::ScalarField: PrimeField,
     pub fn sign_round2(
         parameters: &Parameters<C>,
         protocol_instance_entropy: [u8; 32],
+        message_to_sign: &[u8],
+        sk: &SecretKey<C>,
         _round1_messages: &[ThresholdSchnorrMessage1],
     ) -> Result<ThresholdSchnorrMessage2<C>, Error> {
-        let random_scalar = Self::get_pseudorandom_scalar(protocol_instance_entropy);
+        let random_scalar = Self::get_pseudorandom_scalar(sk, protocol_instance_entropy, message_to_sign);
         let prover_commitment = parameters.generator.mul(random_scalar).into_affine();
 
         Ok(prover_commitment)
@@ -218,7 +230,7 @@ impl<C: CurveGroup + Hash> ThresholdSchnorr<C> where C::ScalarField: PrimeField,
 
         let verifier_challenge = Self::compute_challenge(parameters, round1_messages, round2_messages, &aggregate_pk, message_to_sign)?;
 
-        let random_scalar = Self::get_pseudorandom_scalar(protocol_instance_entropy);
+        let random_scalar = Self::get_pseudorandom_scalar(sk, protocol_instance_entropy, message_to_sign);
 
         // k - xe;
         let prover_response = random_scalar - (verifier_challenge * sk);
@@ -322,12 +334,12 @@ mod tests {
         let protocol_instance_entropy1 = get_entropy();
         let protocol_instance_entropy2 = get_entropy();
         // Round 1
-        let r1_msg1 = ThresholdSchnorr::<C>::sign_round1(&params, protocol_instance_entropy1).unwrap();
-        let r1_msg2 = ThresholdSchnorr::<C>::sign_round1(&params, protocol_instance_entropy2).unwrap();
+        let r1_msg1 = ThresholdSchnorr::<C>::sign_round1(&params, protocol_instance_entropy1, message, &sk1).unwrap();
+        let r1_msg2 = ThresholdSchnorr::<C>::sign_round1(&params, protocol_instance_entropy2, message, &sk2).unwrap();
 
         // Round 2
-        let r2_msg1 = ThresholdSchnorr::<C>::sign_round2(&params, protocol_instance_entropy1, &[r1_msg1, r1_msg2]).unwrap();
-        let r2_msg2 = ThresholdSchnorr::<C>::sign_round2(&params, protocol_instance_entropy2, &[r1_msg1, r1_msg2]).unwrap();
+        let r2_msg1 = ThresholdSchnorr::<C>::sign_round2(&params, protocol_instance_entropy1, message, &sk1, &[r1_msg1, r1_msg2]).unwrap();
+        let r2_msg2 = ThresholdSchnorr::<C>::sign_round2(&params, protocol_instance_entropy2, message, &sk2, &[r1_msg1, r1_msg2]).unwrap();
 
         // Round 3
         let r3_msg1 = ThresholdSchnorr::<C>::sign_round3(
@@ -363,5 +375,35 @@ mod tests {
         // Verify aggregate signature
         let valid = Schnorr::<C>::verify(&params, &aggregate_pk, message, &agg_sig).unwrap();
         assert!(valid);
+    }
+
+    // Regression guard: the nonce must depend on the message, not just entropy, so
+    // reusing `protocol_instance_entropy` across two instances can't reuse the nonce.
+    #[test]
+    fn round1_commitment_differs_when_message_differs_under_reused_entropy() {
+        type C = ark_ed_on_bn254::EdwardsProjective;
+        let params = Schnorr::<C>::setup(get_entropy()).unwrap();
+        let (_pk, sk) = Schnorr::<C>::keygen(&params, get_entropy()).unwrap();
+        let reused_entropy = get_entropy();
+
+        let r1_a = ThresholdSchnorr::<C>::sign_round1(&params, reused_entropy, b"message A", &sk).unwrap();
+        let r1_b = ThresholdSchnorr::<C>::sign_round1(&params, reused_entropy, b"message B", &sk).unwrap();
+
+        assert_ne!(r1_a, r1_b, "reusing instance entropy across two messages must not reuse the same nonce");
+    }
+
+    #[test]
+    fn round1_commitment_differs_for_different_keys_under_reused_entropy() {
+        type C = ark_ed_on_bn254::EdwardsProjective;
+        let params = Schnorr::<C>::setup(get_entropy()).unwrap();
+        let (_pk1, sk1) = Schnorr::<C>::keygen(&params, get_entropy()).unwrap();
+        let (_pk2, sk2) = Schnorr::<C>::keygen(&params, get_entropy()).unwrap();
+        let reused_entropy = get_entropy();
+        let message = b"same message for both signers";
+
+        let r1_a = ThresholdSchnorr::<C>::sign_round1(&params, reused_entropy, message, &sk1).unwrap();
+        let r1_b = ThresholdSchnorr::<C>::sign_round1(&params, reused_entropy, message, &sk2).unwrap();
+
+        assert_ne!(r1_a, r1_b, "reusing instance entropy across two signers must not reuse the same nonce");
     }
 }

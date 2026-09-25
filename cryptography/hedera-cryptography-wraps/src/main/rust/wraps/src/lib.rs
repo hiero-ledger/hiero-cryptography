@@ -772,8 +772,10 @@ impl WRAPS {
     /// # Arguments
     /// * `phase` - Which protocol phase to execute (R1, R2, R3, or Aggregate).
     /// * `protocol_instance_entropy` - Participant-specific randomness reused across rounds.
-    /// * `message_to_sign` - Byte message that rounds R3/Aggregate must attest.
-    /// * `signing_key` - Optional private key required only during phase R3.
+    /// * `message_to_sign` - Byte message that rounds R3/Aggregate must attest. R1-R3 derive the
+    ///   nonce from it, so the same value must be supplied to all three rounds of one instance.
+    /// * `signing_key` - Private key required during phases R1-R3 (it binds the nonce); None in
+    ///   Aggregate.
     /// * `address_book` - AddressBook containing the signers; must be present for phases beyond R1.
     /// * `bitvector` - Bitvector indicating which members of address_book are participating.
     /// * `round1_messages` / `round2_messages` / `round3_messages` - Messages collected from prior rounds.
@@ -824,9 +826,13 @@ impl WRAPS {
                 }
                 let protocol_instance_entropy = protocol_instance_entropy
                     .ok_or_else(|| invalid_input("R1 requires protocol_instance_entropy"))?;
+                let signing_key = signing_key
+                    .ok_or_else(|| invalid_input("R1 requires a signing key"))?;
                 let r1_msg: ThresholdSchnorrR1Msg = ThresholdSchnorr::sign_round1(
                     &pp,
-                    protocol_instance_entropy
+                    protocol_instance_entropy,
+                    message_to_sign.as_ref(),
+                    signing_key,
                 ).map_err(|_| WRAPSError::CryptographyError)?;
                 let r1_msg_encoded = utils::serialize(&r1_msg);
                 Ok(SigningProtocolObject::ProtocolMessage(r1_msg_encoded))
@@ -841,6 +847,8 @@ impl WRAPS {
                 }
                 let protocol_instance_entropy = protocol_instance_entropy
                     .ok_or_else(|| invalid_input("R2 requires protocol_instance_entropy"))?;
+                let signing_key = signing_key
+                    .ok_or_else(|| invalid_input("R2 requires a signing key"))?;
                 let r1_msgs: Vec<ThresholdSchnorrR1Msg> = round1_messages
                     .iter()
                     .map(|m| {
@@ -852,6 +860,8 @@ impl WRAPS {
                 let r2_msg: ThresholdSchnorrR2Msg = ThresholdSchnorr::sign_round2(
                     &pp,
                     protocol_instance_entropy,
+                    message_to_sign.as_ref(),
+                    signing_key,
                     &r1_msgs
                 ).map_err(|_| WRAPSError::CryptographyError)?;
                 // Encode the second-round commitments to broadcast to the committee.
@@ -1418,7 +1428,7 @@ mod tests {
                 SigningProtocolPhase::R1,
                 Some(seeds[i]),
                 message_to_sign,
-                None,
+                Some(sk_refs[i]),
                 address_book,
                 bitvector,
                 &[],
@@ -1436,7 +1446,7 @@ mod tests {
                 SigningProtocolPhase::R2,
                 Some(seeds[i]),
                 message_to_sign,
-                None,
+                Some(sk_refs[i]),
                 address_book,
                 bitvector,
                 &r1_msgs,

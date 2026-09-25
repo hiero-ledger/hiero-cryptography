@@ -135,8 +135,10 @@ public class WRAPSLibraryBridge {
      * Executes a single phase of the threshold Schnorr signing protocol.
      * @param phase Which protocol phase to execute (R1, R2, R3, or Aggregate).
      * @param instanceEntropy Participant-specific randomness reused across rounds.
-     * @param messageToSign Byte message that rounds R3/Aggregate must attest.
-     * @param schnorrPrivateKey Optional private key required only during phases R1-R3. null in Aggregate.
+     * @param messageToSign Byte message that rounds R3/Aggregate must attest. Rounds R1-R3 derive the
+     *                      signing nonce from it, so the same value must be passed to all three rounds
+     *                      of one protocol instance, otherwise aggregation rejects the shares.
+     * @param schnorrPrivateKey Private key required during phases R1-R3 (it binds the nonce). null in Aggregate.
      * @param schnorrPublicKeys Full AddressBook public keys; must be present for phases beyond R1.
      * @param weights Full AddressBook weights; must be present for phases beyond R1.
      * @param nodeIds Full AddressBook nodeIds; must be present for phases beyond R1.

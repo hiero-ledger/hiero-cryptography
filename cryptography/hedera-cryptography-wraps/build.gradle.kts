@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import org.gradle.api.file.FileSystemOperations
 import org.hiero.gradle.extensions.CargoToolchain
 import org.hiero.gradle.tasks.CargoBuildTask
 
@@ -15,6 +16,54 @@ cargo {
     appname = "ceremony"
 }
 
+@DisableCachingByDefault(because = "Clones an upstream repository")
+abstract class PrepareHalo2curves : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val patchFile: RegularFileProperty
+
+    @get:OutputDirectory abstract val localCloneDirectory: DirectoryProperty
+
+    @get:Inject protected abstract val exec: ExecOperations
+    @get:Inject protected abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun prepare() {
+        val localClone = localCloneDirectory.get().asFile
+        files.delete { delete(localClone) }
+        exec.exec {
+            commandLine(
+                "git",
+                "clone",
+                "--depth=1",
+                "--branch=v0.9.0",
+                "https://github.com/privacy-ethereum/halo2curves.git",
+                localClone.absolutePath,
+            )
+        }
+        exec.exec {
+            workingDir = localClone
+            commandLine("git", "apply", patchFile.get().asFile.absolutePath)
+        }
+        // Keep the nested repository until checkout and patching are complete.
+        files.delete { delete(localClone.resolve(".git")) }
+    }
+}
+
+val prepareHalo2curves =
+    tasks.register<PrepareHalo2curves>("prepareHalo2curves") {
+        patchFile =
+            layout.projectDirectory.file("src/main/rust/nova-wraps/halo2curves-v0.9.0.patch")
+        localCloneDirectory = layout.projectDirectory.dir("src/main/rust/nova-wraps/halo2curves")
+    }
+
+tasks.withType<CargoBuildTask>().configureEach { dependsOn(prepareHalo2curves) }
+
+// The following two are to please Gradle:
+tasks.named("spotlessJavaInfoFiles").configure { dependsOn(prepareHalo2curves) }
+
+tasks.named("spotlessRust").configure { dependsOn(prepareHalo2curves) }
+
 testModuleInfo { requires("org.junit.jupiter.api") }
 
 jmhModuleInfo {
@@ -26,31 +75,13 @@ jmhModuleInfo {
 spotless { format("rust") { clearSteps() } }
 
 tasks.test {
-    dependsOn("downloadWrapsArtifactTask")
     jvmArgs(
         "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.hints,com.hedera.cryptography.wraps"
     )
     environment(
         mapOf(
             // For the TSS lib:
-            "TSS_LIB_NUM_OF_CORES" to "10",
-
-            // Path to nova_pp.bin, decider_pp.bin, nova_vp.bin, and decider_vp.bin :
-            "TSS_LIB_WRAPS_ARTIFACTS_PATH" to
-                (tasks.named("downloadWrapsArtifactTask").get().property("wrapsDir")
-                        as DirectoryProperty)
-                    .get()
-                    .dir("v1.6.0")
-                    .asFile
-                    .absolutePath,
-
-            // Cache the proving key so we can construct proof multiple times in the same JVM
-            // w/o having to reload the proving key, which takes up to 27 minutes.
-            "TSS_LIB_WRAPS_ARTIFACTS_CACHE_ENABLED" to "true",
-
-            // Commented-out just to provide an example of how to enable swap for WRAPS 2.0.
-            // When not set, the proof construction may require up to ~16GB of RAM.
-            // "TSS_LIB_WRAPS_SWAP_FILE" to "/tmp/MemoryMapFile",
+            "TSS_LIB_NUM_OF_CORES" to "10"
         )
     )
 }

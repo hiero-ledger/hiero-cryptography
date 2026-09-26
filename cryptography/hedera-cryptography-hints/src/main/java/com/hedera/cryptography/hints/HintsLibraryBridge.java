@@ -15,6 +15,9 @@ public class HintsLibraryBridge {
     /** The max number of signers that we can support w/o running into OutOfMemory as the memory usage is quadratic. */
     private static final short MAX_SIGNERS_NUM = (short) 1023;
 
+    /** The largest hinTS universe size: a power of two holding MAX_SIGNERS_NUM signers plus the reserved hinTS slot. */
+    private static final int MAX_NETWORK_SIZE = MAX_SIGNERS_NUM + 1;
+
     /** The max theoretical sum of weights all nodes together can have, which is 2^63-1 because we use signed long. */
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
 
@@ -428,10 +431,18 @@ public class HintsLibraryBridge {
      */
     public native void resetCache();
 
-    // Returns true if the n is a positive power of two, and the crs isn't null and its length matches or is greater
-    // than the n.
+    // Returns true if n is a positive power of two no larger than MAX_NETWORK_SIZE, and the crs isn't null and is at
+    // least as long as a CRS for that n. The length is computed in long arithmetic because 304 + n * 288 overflows a
+    // signed int for large powers of two -- it wraps to exactly 304 for n in 2^27..2^30 -- which would otherwise let a
+    // 304-byte crs satisfy the gate for a network of a billion parties. The bound on n is checked here, on the
+    // straight-line path, rather than being left to validatePartyId, which callers reach only inside a loop over the
+    // party list and therefore skip entirely when that list is empty.
     private static boolean validateCRS(final byte[] crs, final int n) {
-        return n > 0 && (n & (n - 1)) == 0 && crs != null && crs.length >= (304 + n * 288);
+        return n > 0
+                && (n & (n - 1)) == 0
+                && n <= MAX_NETWORK_SIZE
+                && crs != null
+                && crs.length >= 304L + (long) n * 288L;
     }
 
     private static int inferNFromCRSLength(final byte[] crs) {

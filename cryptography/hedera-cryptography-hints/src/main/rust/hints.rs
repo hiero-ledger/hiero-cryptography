@@ -273,11 +273,7 @@ impl HinTS {
             );
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         let sk = &sk_with_pop.secret;
 
@@ -373,11 +369,7 @@ impl HinTS {
             );
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         // return false immediately if some simple checks dont hold on the hint
         check_or_return_false!(hint.i == i);
@@ -479,11 +471,7 @@ impl HinTS {
             return Err(HinTSError::InvalidNetworkSize(n));
         }
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         let mut weights: Vec<Weight> = Vec::new();
         let mut epks: Vec<ExtendedPublicKey> = Vec::new();
@@ -644,11 +632,7 @@ impl HinTS {
     ) -> Result<ThresholdSignature, HinTSError> {
         let n = ak.n;
 
-        // CRS must be large enough to support the operation
-        // NOTE: CRS must also be valid, but we assume that here!
-        if crs.powers_of_g.len() - 1 < n {
-            return Err(HinTSError::InsufficientCRS(n));
-        }
+        check_crs_is_sufficient(crs, n)?;
 
         // we require n to be a power of 2
         if !utils::is_n_valid(n) {
@@ -942,6 +926,21 @@ impl HinTS {
         check_or_return_false!(lhs == rhs);
 
         Ok(true)
+    }
+}
+
+/// Checks that `crs` carries enough powers of tau to support a network of size `n`.
+///
+/// `powers_of_g` holds degrees `0..=max_degree`, so the CRS supports `n` exactly when
+/// `max_degree >= n`. The subtraction is checked because a CRS with no powers has no maximum
+/// degree at all: it must be reported as insufficient rather than underflowing to `usize::MAX`,
+/// which would make this gate accept every `n`.
+///
+/// NOTE: this checks the size only. The CRS must also be valid, but we assume that here!
+fn check_crs_is_sufficient(crs: &CRS, n: usize) -> Result<(), HinTSError> {
+    match crs.powers_of_g.len().checked_sub(1) {
+        Some(max_degree) if max_degree >= n => Ok(()),
+        _ => Err(HinTSError::InsufficientCRS(n)),
     }
 }
 
@@ -1240,6 +1239,26 @@ mod tests {
     /// if the input buffer cannot be deserialized properly.
     fn deserialize<T: CanonicalDeserialize>(buf: &[u8]) -> T {
         T::deserialize_uncompressed(buf).unwrap()
+    }
+
+    // Regression guard: `powers_of_g.len() - 1` underflowed to usize::MAX on an empty CRS, so the sufficiency gate
+    // accepted every n and the caller went on to size a polynomial from that n.
+    #[test]
+    fn empty_crs_is_insufficient_rather_than_underflowing() {
+        let empty_crs = CRS {
+            powers_of_g: vec![],
+            powers_of_h: vec![],
+        };
+        let sk = HinTS::keygen([7u8; 32]).unwrap();
+
+        assert!(
+            matches!(HinTS::hint_gen(&empty_crs, 4, 0, &sk), Err(HinTSError::InsufficientCRS(4))),
+            "hint_gen must report an empty CRS as insufficient"
+        );
+        assert!(
+            matches!(HinTS::preprocess(4, &empty_crs, &HashMap::new()), Err(HinTSError::InsufficientCRS(4))),
+            "preprocess must report an empty CRS as insufficient"
+        );
     }
 
     #[test]

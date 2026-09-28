@@ -28,10 +28,11 @@ val prepareHalo2curves =
 
 tasks.withType<CargoBuildTask>().configureEach { dependsOn(prepareHalo2curves) }
 
-// The following two are to please Gradle:
-tasks.named("spotlessJavaInfoFiles").configure { dependsOn(prepareHalo2curves) }
+// The 'prepareHalo2curves' modifies the 'src/rust' folder, which is normally not modified by tasks.
+// Tasks operating on this folder, do not know about this and hence require an explicit 'dependsOn'.
+tasks.named("spotlessJavaInfoFiles") { dependsOn(prepareHalo2curves) }
 
-tasks.named("spotlessRust").configure { dependsOn(prepareHalo2curves) }
+tasks.named("spotlessRust") { dependsOn(prepareHalo2curves) }
 
 testModuleInfo { requires("org.junit.jupiter.api") }
 

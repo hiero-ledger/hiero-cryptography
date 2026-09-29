@@ -6,22 +6,33 @@ import com.hedera.cryptography.security.der.codec.DerOutputStream;
 import com.hedera.cryptography.security.der.codec.DerWriter;
 
 /// A signature algorithm identifier.
-/// Currently, we only support the SHA384withRSA algorithm.
-public record SignatureAlgorithm(String signatureAlgorithm) implements DerEncoder {
-    private static final String SHA_384_WITH_RSA = "SHA384withRSA";
-    private static final String OID_SHA_384_WITH_RSA = "1.2.840.113549.1.1.12";
+public record SignatureAlgorithm(String signatureAlgorithm, OID oid, boolean needsNullParam) implements DerEncoder {
+    /// A helper constructor that assigns correct values based on the canonical algorithm name.
+    public SignatureAlgorithm(String signatureAlgorithm) {
+        final OID oid;
+        final boolean needsNullParam;
 
-    public SignatureAlgorithm {
-        if (!SHA_384_WITH_RSA.equalsIgnoreCase(signatureAlgorithm)) {
-            throw new IllegalArgumentException(
-                    "Only " + SHA_384_WITH_RSA + " signature algorithm is supported, got: " + signatureAlgorithm);
+        if ("SHA384withRSA".equalsIgnoreCase(signatureAlgorithm)) {
+            oid = new OID("1.2.840.113549.1.1.12");
+            needsNullParam = true;
+        } else if ("SHA384withECDSA".equalsIgnoreCase(signatureAlgorithm)) {
+            oid = new OID("1.2.840.10045.4.3.3");
+            needsNullParam = false;
+        } else if ("Ed25519".equalsIgnoreCase(signatureAlgorithm)) {
+            oid = new OID("1.3.101.112");
+            needsNullParam = false;
+        } else {
+            throw new IllegalArgumentException("Unknown signature algorithm: " + signatureAlgorithm);
         }
+
+        this(signatureAlgorithm, oid, needsNullParam);
     }
 
     @Override
     public void emit(DerOutputStream os) {
-        new OID(OID_SHA_384_WITH_RSA).encode(os);
-        // SHA384withRSA needs a NULL parameter:
-        DerWriter.putNull(os);
+        oid.encode(os);
+        if (needsNullParam) {
+            DerWriter.putNull(os);
+        }
     }
 }

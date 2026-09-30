@@ -46,12 +46,18 @@ public final class Hcpq {
     private static final byte[] TX_CONTEXT = "HCPQ-SIG-TX-v1".getBytes(StandardCharsets.US_ASCII);
     private static final Provider PROVIDER = new BouncyCastleProvider();
 
+    /**
+     * Pure ML-DSA pinned to the ML-DSA-44 parameter set. The generic "ML-DSA" name would accept ML-DSA-65 and
+     * ML-DSA-87 keys, and HashML-DSA is a different algorithm name, so neither can be selected by accident.
+     */
+    private static final String ALGORITHM = "ML-DSA-44";
+
     private Hcpq() {}
 
     /** Generates an ML-DSA-44 key pair using caller-supplied cryptographic randomness. */
     public static KeyPair generateKeyPair(final SecureRandom random) throws GeneralSecurityException {
         Objects.requireNonNull(random, "random must not be null");
-        final var generator = KeyPairGenerator.getInstance("ML-DSA", PROVIDER);
+        final var generator = KeyPairGenerator.getInstance(ALGORITHM, PROVIDER);
         generator.initialize(MLDSAParameterSpec.ml_dsa_44, random);
         return generator.generateKeyPair();
     }
@@ -79,7 +85,8 @@ public final class Hcpq {
     }
 
     /**
-     * Signs the HCPQ transaction digest. The caller must supply the exact canonical TransactionBody bytes.
+     * Signs the HCPQ transaction digest with pure ML-DSA-44 and the {@code HCPQ-SIG-TX-v1} context. The caller must
+     * supply the exact canonical TransactionBody bytes. Signing is hedged with {@code random}.
      */
     public static byte[] signTransaction(
             final byte[] ledgerId,
@@ -91,7 +98,7 @@ public final class Hcpq {
         Objects.requireNonNull(privateKey, "privateKey must not be null");
         Objects.requireNonNull(random, "random must not be null");
 
-        final var signer = Signature.getInstance("ML-DSA", PROVIDER);
+        final var signer = Signature.getInstance(ALGORITHM, PROVIDER);
         signer.initSign(privateKey, random);
         signer.setParameter(new ContextParameterSpec(TX_CONTEXT));
         signer.update(transactionDigest(ledgerId, canonicalTransactionBody));
@@ -119,8 +126,8 @@ public final class Hcpq {
             }
 
             final var spec = new MLDSAPublicKeySpec(MLDSAParameterSpec.ml_dsa_44, rawPublicKey);
-            final var publicKey = KeyFactory.getInstance("ML-DSA", PROVIDER).generatePublic(spec);
-            final var verifier = Signature.getInstance("ML-DSA", PROVIDER);
+            final var publicKey = KeyFactory.getInstance(ALGORITHM, PROVIDER).generatePublic(spec);
+            final var verifier = Signature.getInstance(ALGORITHM, PROVIDER);
             verifier.initVerify(publicKey);
             verifier.setParameter(new ContextParameterSpec(TX_CONTEXT));
             verifier.update(transactionDigest(ledgerId, canonicalTransactionBody));

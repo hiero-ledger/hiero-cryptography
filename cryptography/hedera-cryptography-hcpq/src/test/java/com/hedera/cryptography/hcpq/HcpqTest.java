@@ -7,8 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.security.InvalidKeyException;
+import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
 import java.util.HexFormat;
+import org.bouncycastle.jcajce.spec.MLDSAParameterSpec;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.Test;
 
 class HcpqTest {
@@ -78,5 +82,21 @@ class HcpqTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> Hcpq.signTransaction(LEDGER, new byte[0], pair.getPrivate(), random));
+    }
+
+    @Test
+    void signingRejectsOtherMlDsaParameterSets() throws Exception {
+        final var random = new SecureRandom();
+        final var provider = new BouncyCastleProvider();
+
+        final var mlDsa65 = KeyPairGenerator.getInstance("ML-DSA", provider);
+        mlDsa65.initialize(MLDSAParameterSpec.ml_dsa_65, random);
+        final var mlDsa65Key = mlDsa65.generateKeyPair().getPrivate();
+        assertThrows(InvalidKeyException.class, () -> Hcpq.signTransaction(LEDGER, BODY, mlDsa65Key, random));
+
+        final var hashMlDsa44 = KeyPairGenerator.getInstance("HASH-ML-DSA", provider);
+        hashMlDsa44.initialize(MLDSAParameterSpec.ml_dsa_44_with_sha512, random);
+        final var hashMlDsa44Key = hashMlDsa44.generateKeyPair().getPrivate();
+        assertThrows(InvalidKeyException.class, () -> Hcpq.signTransaction(LEDGER, BODY, hashMlDsa44Key, random));
     }
 }

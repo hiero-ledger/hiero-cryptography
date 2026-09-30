@@ -3,11 +3,6 @@ name = "wraps"
 version = "0.1.0"
 edition.workspace = true
 
-[lib]
-name = "wraps"
-path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
 ark-ec = { workspace = true }
 ark-ff = { workspace = true, features = ["asm"] }

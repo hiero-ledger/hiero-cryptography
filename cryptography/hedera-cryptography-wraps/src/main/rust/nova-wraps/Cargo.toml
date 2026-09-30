@@ -1,0 +1,65 @@
+[package]
+name = "novawraps"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88.0"
+description = "Address-book rotation attested by a weighted Schnorr multisignature, folded with Nova"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wraps"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Resolved from crates.io. `io` provides the powers-of-tau loader that
+# `WRAPS::load_public_params` needs.
+# The compact verifier-key codec is tied to Nova 0.76.0's non-EVM Serde layout.
+nova-snark = { version = "=0.76.0", default-features = false, features = ["io"] }
+
+ff = { version = "0.13.0", features = ["derive"] }
+generic-array = "1.2.0"
+serde = { version = "1.0.217", features = ["derive"] }
+# Fixed-size signer arrays exceed serde's built-in array implementations.
+serde_arrays = "0.2"
+bincode = { version = "2", features = ["serde", "std"] }
+flate2 = "1.0.35"
+sha2 = "0.10.7"
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+rand_chacha = "0.3"
+jni = "0.21.1"
+
+[dev-dependencies]
+rand = "0.8.5"
+# The demo constructs field elements directly.
+ff = { version = "0.13.0", features = ["derive"] }
+
+# `halo2curves` 0.9.0 ships a leftover `println!` inside `exp_by_x`
+# (`src/bn256/curve.rs`) that fires 62 times per call. The BN254 G2 subgroup check
+# reaches it whenever a G2 point is parsed, so loading the SRS and reading a verifier
+# key each spray stdout with `true`/`false`. It is gated on halo2curves' `std` feature
+# alone, which `nova-snark` cannot give up — its ptau serialization needs the `std`-only
+# `SerdeObject` methods, and `provider::msm` delegates full-width-scalar MSMs to
+# `msm_best`, whose parallelism comes from `plonky2_maybe_rayon/parallel`. So the print
+# cannot be turned off with features.
+#
+# `halo2curves/` vendors upstream `v0.9.0` with the print removed and pre-existing
+# warnings allowed for this path dependency. Its `asm` feature enables only `std`,
+# so Nova's explicit x86_64 `asm` request uses portable Rust field arithmetic.
+# The obsolete assembly build guard is also removed. See README for the full delta.
+# The workspace root declares the halo2curves path patch, so it also applies to
+# crates.io Nova. Cargo ignores patches declared in workspace member manifests.
+
+[profile.bench]
+opt-level = 3
+
+[profile.test]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"
+lto = "fat"
+strip = true
+debug = false
+opt-level = 3
+codegen-units = 1

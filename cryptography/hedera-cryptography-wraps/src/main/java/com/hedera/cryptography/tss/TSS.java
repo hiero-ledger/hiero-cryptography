@@ -12,8 +12,8 @@ public final class TSS {
 
     private static final int HINTS_VERIFICATION_KEY_LENGTH = 1096;
     private static final int HINTS_SIGNATURE_LENGTH = 1632;
-    private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 704;
-    private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 192;
+    private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 11368;
+    private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 128;
 
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final WRAPSLibraryBridge WRAPS = WRAPSLibraryBridge.getInstance();

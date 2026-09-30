@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import org.hiero.gradle.extensions.CargoToolchain
 import org.hiero.gradle.tasks.CargoBuildTask
+import org.hiero.gradle.tasks.GitClone
 
 plugins {
     id("org.hiero.gradle.module.library")
@@ -15,6 +16,24 @@ cargo {
     appname = "ceremony"
 }
 
+val prepareHalo2curves =
+    tasks.register<GitClone>("prepareHalo2curves") {
+        url = "https://github.com/privacy-ethereum/halo2curves.git"
+        tag = "v0.9.0"
+        patches.from(
+            layout.projectDirectory.file("src/main/rust/nova-wraps/halo2curves-v0.9.0.patch")
+        )
+        localCloneDirectory = layout.projectDirectory.dir("src/main/rust/nova-wraps/halo2curves")
+    }
+
+tasks.withType<CargoBuildTask>().configureEach { dependsOn(prepareHalo2curves) }
+
+// The 'prepareHalo2curves' modifies the 'src/rust' folder, which is normally not modified by tasks.
+// Tasks operating on this folder, do not know about this and hence require an explicit 'dependsOn'.
+tasks.named("spotlessJavaInfoFiles") { dependsOn(prepareHalo2curves) }
+
+tasks.named("spotlessRust") { dependsOn(prepareHalo2curves) }
+
 testModuleInfo { requires("org.junit.jupiter.api") }
 
 jmhModuleInfo {
@@ -26,31 +45,13 @@ jmhModuleInfo {
 spotless { format("rust") { clearSteps() } }
 
 tasks.test {
-    dependsOn("downloadWrapsArtifactTask")
     jvmArgs(
         "--enable-native-access=com.hedera.common.nativesupport,com.hedera.cryptography.hints,com.hedera.cryptography.wraps"
     )
     environment(
         mapOf(
             // For the TSS lib:
-            "TSS_LIB_NUM_OF_CORES" to "10",
-
-            // Path to nova_pp.bin, decider_pp.bin, nova_vp.bin, and decider_vp.bin :
-            "TSS_LIB_WRAPS_ARTIFACTS_PATH" to
-                (tasks.named("downloadWrapsArtifactTask").get().property("wrapsDir")
-                        as DirectoryProperty)
-                    .get()
-                    .dir("v1.6.0")
-                    .asFile
-                    .absolutePath,
-
-            // Cache the proving key so we can construct proof multiple times in the same JVM
-            // w/o having to reload the proving key, which takes up to 27 minutes.
-            "TSS_LIB_WRAPS_ARTIFACTS_CACHE_ENABLED" to "true",
-
-            // Commented-out just to provide an example of how to enable swap for WRAPS 2.0.
-            // When not set, the proof construction may require up to ~16GB of RAM.
-            // "TSS_LIB_WRAPS_SWAP_FILE" to "/tmp/MemoryMapFile",
+            "TSS_LIB_NUM_OF_CORES" to "10"
         )
     )
 }

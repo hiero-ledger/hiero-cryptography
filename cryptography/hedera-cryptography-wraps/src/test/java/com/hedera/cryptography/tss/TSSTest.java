@@ -16,7 +16,6 @@ import com.hedera.cryptography.wraps.WRAPSLibraryBridgeTest;
 import com.hedera.cryptography.wraps.WRAPSLibraryBridgeTest.Network;
 import com.hedera.cryptography.wraps.WRAPSLibraryBridgeTest.Node;
 import com.hedera.cryptography.wraps.WRAPSLibraryBridgeTest.SigningProtocolOutput;
-import java.io.FileInputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -44,7 +43,7 @@ public class TSSTest {
                 TSS.composeSignature(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
 
         // Unhappy cases last
         assertThrows(
@@ -88,27 +87,29 @@ public class TSSTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        null, TSSTestConstants.HINTS_SIGNATURE, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        null, TSSTestConstants.HINTS_SIGNATURE, TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        EMPTY, TSSTestConstants.HINTS_SIGNATURE, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        EMPTY, TSSTestConstants.HINTS_SIGNATURE, TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        ONE, TSSTestConstants.HINTS_SIGNATURE, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        ONE, TSSTestConstants.HINTS_SIGNATURE, TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY, null, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        TSSTestConstants.HINTS_VERIFICATION_KEY, null, TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY, EMPTY, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        TSSTestConstants.HINTS_VERIFICATION_KEY,
+                        EMPTY,
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY, ONE, TSSTestConstants.COMPRESSED_WRAPS_PROOF));
+                        TSSTestConstants.HINTS_VERIFICATION_KEY, ONE, TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF));
     }
 
     /**
@@ -175,7 +176,7 @@ public class TSSTest {
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
 
         // Then unhappy cases, starting with unverifiable data
@@ -184,35 +185,35 @@ public class TSSTest {
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
                 TSSTestConstants.ADDRESS_BOOK_HASH,
                 concat(
                         rnd(TSSTestConstants.HINTS_VERIFICATION_KEY, rnd),
                         TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
                 TSSTestConstants.ADDRESS_BOOK_HASH,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         rnd(TSSTestConstants.HINTS_SIGNATURE, rnd),
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
                 TSSTestConstants.ADDRESS_BOOK_HASH,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
-                        rnd(TSSTestConstants.COMPRESSED_WRAPS_PROOF, rnd)),
+                        rnd(TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF, rnd)),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
                 TSSTestConstants.ADDRESS_BOOK_HASH,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                        TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 rnd(TSSTestConstants.MESSAGE, rnd)));
 
         TSS.setAddressBook(TSSTestConstants.SCHNORR_PUBLIC_KEYS, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
@@ -287,7 +288,7 @@ public class TSSTest {
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
-                                TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
@@ -296,7 +297,7 @@ public class TSSTest {
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
-                                TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
@@ -305,7 +306,7 @@ public class TSSTest {
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
-                                TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
@@ -334,7 +335,7 @@ public class TSSTest {
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
-                                TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         null));
         assertThrows(
                 IllegalArgumentException.class,
@@ -343,7 +344,7 @@ public class TSSTest {
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
-                                TSSTestConstants.COMPRESSED_WRAPS_PROOF),
+                                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         EMPTY));
     }
 
@@ -356,14 +357,7 @@ public class TSSTest {
     // @Test
     void captureTestData() throws Exception {
         if (!WRAPSLibraryBridge.isProofSupported()) {
-            // Gradle script should download artifacts and set TSS_LIB_WRAPS_ARTIFACTS_PATH to bypass this.
-            fail("Must have TSS_LIB_WRAPS_ARTIFACTS_PATH downloaded, or comment out @Test annotation instead.");
-        }
-
-        try (FileInputStream fis =
-                new FileInputStream(System.getenv("TSS_LIB_WRAPS_ARTIFACTS_PATH") + "/decider_vp.bin")) {
-            final byte[] bytes = fis.readNBytes(4096); // It's 1.7KB, but limit to 4KB for safety.
-            System.err.println("decider_vp.bin aka WRAPSVerificationKey.DEFAULT_KEY = " + Arrays.toString(bytes));
+            fail("Must have public parameters available. See WRAPSLibraryBridge.isProofSupported().");
         }
 
         final Network genesisNetwork = new Network(List.of(

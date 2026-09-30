@@ -20,7 +20,8 @@ public class WRAPSLibraryBridgeTest {
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final byte[][] EMPTY_BYTE_ARRAY_2 = new byte[0][];
 
-    private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 40946392;
+    private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 3076656;
+    private static final int COMPRESSED_PROOF_SIZE_BYTES = 11368;
 
     // We use ABs with 4 and 5 entries, so 8 should be good.
     private static final int SIGNERS_NUM = 8;
@@ -188,7 +189,11 @@ public class WRAPSLibraryBridgeTest {
                 Node.from(Constants.SEED_1, 0, 1),
                 Node.from(Constants.SEED_2, 100, 2)));
 
-        final SigningProtocolOutput output = aggregateSignature(network, Constants.MESSAGE_0);
+        byte[] hintsVK = new byte[1096];
+        final byte[] message =
+                WRAPS.formatRotationMessage(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
+
+        final SigningProtocolOutput output = aggregateSignature(network, message);
         for (int roundIndex = 0; roundIndex < 3; roundIndex++) {
             for (int i = 0; i < output.roundMessages().get(roundIndex).size(); i++) {
                 assertArrayEquals(
@@ -201,52 +206,48 @@ public class WRAPSLibraryBridgeTest {
 
         // Let's also verify the signature while we're at it, so that we don't duplicate the code above:
         assertTrue(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_0, output.signature()));
+                network.publicKeys(), network.weights(), network.nodeIds(), message, output.signature()));
         network.publicKeys()[0][20]++;
         assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_0, output.signature()));
+                network.publicKeys(), network.weights(), network.nodeIds(), message, output.signature()));
         network.publicKeys()[0][20]--;
         assertFalse(WRAPS.verifySignature(
                 network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_1, output.signature()));
 
         // 128 is the MAX_AB_SIZE. The sig has a bool-vector prefix with the signers. Easier to corrupt the sig itself:
-        output.signature()[128 + 7]++;
+        output.signature()[64 + 7]++;
         assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_0, output.signature()));
-        output.signature()[128 + 7]--;
+                network.publicKeys(), network.weights(), network.nodeIds(), message, output.signature()));
+        output.signature()[64 + 7]--;
 
         // And while we're at it, let's test verifySignature constraints
+        assertFalse(WRAPS.verifySignature(null, network.weights(), network.nodeIds(), message, output.signature()));
         assertFalse(WRAPS.verifySignature(
-                null, network.weights(), network.nodeIds(), Constants.MESSAGE_0, output.signature()));
+                EMPTY_BYTE_ARRAY_2, network.weights(), network.nodeIds(), message, output.signature()));
+        assertFalse(WRAPS.verifySignature(network.publicKeys(), null, network.nodeIds(), message, output.signature()));
         assertFalse(WRAPS.verifySignature(
-                EMPTY_BYTE_ARRAY_2, network.weights(), network.nodeIds(), Constants.MESSAGE_0, output.signature()));
+                network.publicKeys(), new long[0], network.nodeIds(), message, output.signature()));
+        assertFalse(WRAPS.verifySignature(network.publicKeys(), network.weights(), null, message, output.signature()));
         assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), null, network.nodeIds(), Constants.MESSAGE_0, output.signature()));
-        assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), new long[0], network.nodeIds(), Constants.MESSAGE_0, output.signature()));
-        assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), null, Constants.MESSAGE_0, output.signature()));
-        assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), new long[0], Constants.MESSAGE_0, output.signature()));
+                network.publicKeys(), network.weights(), new long[0], message, output.signature()));
         assertFalse(WRAPS.verifySignature(
                 network.publicKeys(), network.weights(), network.nodeIds(), null, output.signature()));
         assertFalse(WRAPS.verifySignature(
                 network.publicKeys(), network.weights(), network.nodeIds(), new byte[0], output.signature()));
+        assertFalse(WRAPS.verifySignature(network.publicKeys(), network.weights(), network.nodeIds(), message, null));
         assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_0, null));
-        assertFalse(WRAPS.verifySignature(
-                network.publicKeys(), network.weights(), network.nodeIds(), Constants.MESSAGE_0, new byte[0]));
+                network.publicKeys(), network.weights(), network.nodeIds(), message, new byte[0]));
         assertFalse(WRAPS.verifySignature(
                 new byte[][] {network.publicKeys()[0], null},
                 network.weights(),
                 network.nodeIds(),
-                Constants.MESSAGE_0,
+                message,
                 output.signature()));
         assertFalse(WRAPS.verifySignature(
                 new byte[][] {network.publicKeys()[0], new byte[0]},
                 network.weights(),
                 network.nodeIds(),
-                Constants.MESSAGE_0,
+                message,
                 output.signature()));
     }
 
@@ -777,12 +778,17 @@ public class WRAPSLibraryBridgeTest {
                 new long[] {1000, 0, 100},
                 new long[] {0, 1, 3}));
 
-        // Native code supports up to MAX_AB_SIZE = 128 (as of 10/20/2025), so let's try 128 and 129:
+        // Native code supports up to MAX_AB_SIZE = 64 (as of 10/20/2025), so let's try 64 and 65:
         // This should succeed (aka return non-null):
-        final int maxAllowedNum = 128;
+        final int maxAllowedNum = WRAPSLibraryBridge.MAX_AB_SIZE;
         assertNotNull(WRAPS.hashAddressBook(
                 listToArray(IntStream.range(0, maxAllowedNum)
-                        .mapToObj(i -> schnorrKeys.publicKey())
+                        .mapToObj(i -> {
+                            byte[] seed = Arrays.copyOf(Constants.SEED_0, Constants.SEED_0.length);
+                            seed[0] = (byte) i;
+                            final SchnorrKeys keys = WRAPS.generateSchnorrKeys(seed);
+                            return keys.publicKey();
+                        })
                         .toList()),
                 new long[maxAllowedNum],
                 new long[maxAllowedNum]));
@@ -839,7 +845,7 @@ public class WRAPSLibraryBridgeTest {
                 genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds(), dummyHintsKey);
         final SigningProtocolOutput output0 = aggregateSignature(genesisNetwork, message0);
 
-        System.err.println("Computing proof0 which may take up to 30 minutes...");
+        System.err.println("Computing proof0 which may take up to ~1 minute...");
         final Proof proof0 = WRAPS.constructWrapsProof(
                 genesisAddressBookHash,
                 genesisNetwork.publicKeys(),
@@ -853,18 +859,12 @@ public class WRAPSLibraryBridgeTest {
                 output0.signature());
 
         assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof0.uncompressed().length);
-        assertEquals(704, proof0.compressed().length);
+        assertEquals(COMPRESSED_PROOF_SIZE_BYTES, proof0.compressed().length);
 
         // Note: the compressed proof is non-deterministic, so we can only check the size, and then verify it:
         assertTrue(WRAPS.verifyCompressedProof(proof0.compressed(), genesisAddressBookHash, dummyHintsKey));
 
         // Now let's test a rotated AddressBook.
-
-        // NOTE: we rely on the TSS_LIB_WRAPS_ARTIFACTS_CACHE_ENABLED env var set to "true" in Gradle.
-        // so that the proving key is cached and the second proof here takes only a few minutes.
-        // Otherwise, this test is going to take ~1 hour because loading the key takes ~27 minutes.
-        // With the cache enabled, both the proofs together take ~30 minutes only.
-
         final Network nextNetwork = new Network(List.of(
                 Node.from(Constants.SEED_0, 1000, 0),
                 Node.from(Constants.SEED_1, 0, 1),
@@ -898,7 +898,7 @@ public class WRAPSLibraryBridgeTest {
                 output1.signature());
 
         assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof1.uncompressed().length);
-        assertEquals(704, proof1.compressed().length);
+        assertEquals(COMPRESSED_PROOF_SIZE_BYTES, proof1.compressed().length);
         assertTrue(
                 WRAPS.verifyCompressedProof(proof1.compressed(), genesisAddressBookHash, hintsKeys.verificationKey()));
     }

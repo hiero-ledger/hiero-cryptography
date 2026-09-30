@@ -10,8 +10,6 @@
 mod signature;
 mod random_oracle;
 mod utils;
-mod jni_util;
-mod jni_wraps;
 mod alloc;
 pub mod preprocessing;
 

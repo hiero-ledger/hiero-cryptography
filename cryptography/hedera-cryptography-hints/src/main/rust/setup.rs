@@ -282,6 +282,7 @@ fn compute_sha256(inputs: &[impl AsRef<[u8]>]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+#[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
     use super::{PowersOfTauProtocol as Prot, *};

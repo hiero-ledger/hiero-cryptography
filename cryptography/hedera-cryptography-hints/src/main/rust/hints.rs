@@ -1785,6 +1785,13 @@ mod tests {
                     "n = {}, {}", n, label
                 );
                 assert_eq!(run_all_checks(msg, &vk, &π), CheckOutcomes::all_pass(), "n = {}, {}", n, label);
+                // every party shares one key, so BLS pins how many parties signed but not which;
+                // the weights differ per party, so the claimed weight pins which were credited
+                assert_eq!(
+                    π.agg_weight,
+                    sigs.keys().fold(F::from(0), |acc, &i| acc + ak.weights[i]),
+                    "n = {}, {}", n, label
+                );
             }
         }
     }

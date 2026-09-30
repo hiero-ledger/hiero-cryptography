@@ -2032,11 +2032,40 @@ mod tests {
             assert_eq!(before.2 != after.2, round <= 3, "{}: χ_op", field);
         }
 
-        // the whole verification key is part of round 1
-        let mut other_vk = vk.clone();
-        other_vk.total_weight += F::from(1);
-        let after = derive_challenges(&other_vk, &π).unwrap();
-        assert!(before.0 != after.0 && before.1 != after.1 && before.2 != after.2);
+        // the whole verification key is part of round 1: changing any one of its 9 fields moves
+        // all three challenges. Each change keeps the key serializable: + 1 for the scalar, +
+        // the generator for points, and another valid domain size for n.
+        let g1 = G1AffinePoint::generator();
+        let g2 = G2AffinePoint::generator();
+        let bump_g1 = |p: G1AffinePoint| (p + g1).into_affine();
+        let bump_g2 = |p: G2AffinePoint| (p + g2).into_affine();
+        let bump_f = |x: F| x + F::from(1);
+        let double = |n: usize| n * 2;
+        let mut other_vks = vec![];
+        macro_rules! tamper_vk {
+            ($field:ident, $change:expr) => {{
+                let mut copy = vk.clone();
+                copy.$field = $change(copy.$field);
+                other_vks.push((stringify!($field), copy));
+            }};
+        }
+        tamper_vk!(n, double);
+        tamper_vk!(total_weight, bump_f);
+        tamper_vk!(g_0, bump_g1);
+        tamper_vk!(h_0, bump_g2);
+        tamper_vk!(h_1, bump_g2);
+        tamper_vk!(l_n_minus_1_of_tau_com, bump_g1);
+        tamper_vk!(w_of_tau_com, bump_g1);
+        tamper_vk!(sk_of_tau_com, bump_g2);
+        tamper_vk!(z_of_tau_com, bump_g2);
+        assert_eq!(other_vks.len(), 9);
+        for (field, other_vk) in other_vks {
+            let after = derive_challenges(&other_vk, &π).unwrap();
+            assert!(
+                before.0 != after.0 && before.1 != after.1 && before.2 != after.2,
+                "vk.{} is not bound by round 1", field
+            );
+        }
     }
 
     /// aggregate refuses inputs that cannot satisfy the relations, rather than emitting a
@@ -2079,5 +2108,67 @@ mod tests {
         let (crs, ak, vk, _sks, _) = sample_universe(8);
         let π = HinTS::aggregate(&crs, &ak, &vk, &HashMap::new()).unwrap();
         assert!(!HinTS::verify(msg, &vk, &π, (F::from(0), F::from(1))).unwrap());
+    }
+
+    /// Proves a tampered witness that still satisfies all four relations, and checks that
+    /// one pairing check, and only that one, catches it: `outcomes` is what run_all_checks
+    /// must report. The claim must clear the threshold, so that without that check the
+    /// signature would verify.
+    fn assert_only_pairing_check_rejects(
+        crs: &CRS,
+        ak: &AggregationKey,
+        vk: &VerificationKey,
+        msg: &[u8],
+        witness: &Witness,
+        threshold: (F, F),
+        outcomes: CheckOutcomes,
+    ) {
+        let (π, exact) = prove(crs, ak, vk, witness).unwrap();
+        assert!(exact, "the tampering leaves the four relations intact");
+
+        let (numerator, denominator) = threshold;
+        assert!(denominator * π.agg_weight > numerator * vk.total_weight);
+
+        assert_eq!(run_all_checks(msg, vk, &π), outcomes);
+        assert!(!HinTS::verify(msg, vk, &π, threshold).unwrap());
+    }
+
+    /// The sumcheck ties the aggregate key to the bitmap. Only party 0 signs, but the witness
+    /// claims every party: its bitmap, running sums and hint sums are the honest ones for the
+    /// full set, so all four relations hold, and its aggregate key and signature are party 0's
+    /// alone, so BLS holds too. Without the sumcheck, one partial signature would make a
+    /// signature for the whole network.
+    #[test]
+    fn test_sumcheck_rejects_claimed_signers_who_did_not_sign() {
+        let n = 8;
+        let msg = b"sumcheck";
+        let (crs, ak, vk, sks, _) = sample_universe(n);
+        let n_inv = F::from(1) / F::from(n as u64);
+
+        let mut witness = assemble_witness(&ak, &sign_all(msg, &sks, 0..n - 1)).unwrap();
+        let sigs = sign_all(msg, &sks, [0]);
+        witness.agg_pk = ak.pks[0].mul(n_inv).into_affine();
+        witness.agg_sig = sigs[&0].mul(n_inv).into_affine();
+
+        assert_only_pairing_check_rejects(
+            &crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)),
+            CheckOutcomes { sumcheck: false, ..CheckOutcomes::all_pass() },
+        );
+    }
+
+    /// verify runs the degree check: a [Q_x(τ)·τ]_1 that disagrees with [Q_x(τ)]_1, absorbed
+    /// into the transcript exactly as the prover committed it, is caught by the degree check
+    /// alone. The change gains an attacker nothing; it pins that the check is wired in.
+    #[test]
+    fn test_degree_check_rejects_inconsistent_qx_mul_tau() {
+        let msg = b"degree";
+        let (crs, ak, vk, _sigs, mut witness) = honest_setup(8, msg);
+        witness.qx_of_tau_mul_tau_com =
+            (witness.qx_of_tau_mul_tau_com + G1AffinePoint::generator()).into_affine();
+
+        assert_only_pairing_check_rejects(
+            &crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)),
+            CheckOutcomes { degree: false, ..CheckOutcomes::all_pass() },
+        );
     }
 }

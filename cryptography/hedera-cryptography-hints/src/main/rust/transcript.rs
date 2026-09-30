@@ -35,7 +35,8 @@ impl Transcript {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_bls12_381::Fr as F;
+    use ark_bls12_381::{Fr as F, G1Affine};
+    use ark_ec::AffineRepr;
 
     const DST_A: &[u8] = b"TRANSCRIPT_TEST_A";
     const DST_B: &[u8] = b"TRANSCRIPT_TEST_B";
@@ -61,5 +62,33 @@ mod tests {
         u.absorb(&F::from(2u64)).unwrap();
         u.absorb(&F::from(1u64)).unwrap();
         assert_ne!(second, u.challenge::<F>(DST_A));
+
+        // an earlier item is bound too, not only the last one
+        let mut v = Transcript::new();
+        v.absorb(&F::from(3u64)).unwrap();
+        v.absorb(&F::from(2u64)).unwrap();
+        assert_ne!(second, v.challenge::<F>(DST_A));
+    }
+
+    #[test]
+    fn test_challenges_hash_compressed_encodings_with_crate_hasher() {
+        let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST_A);
+
+        // the challenge is the crate's SHA-256 hash-to-field over the encodings, appended in order
+        let mut t = Transcript::new();
+        t.absorb(&F::from(1u64)).unwrap();
+        t.absorb(&F::from(2u64)).unwrap();
+        let mut bytes = Vec::new();
+        F::from(1u64).serialize_compressed(&mut bytes).unwrap();
+        F::from(2u64).serialize_compressed(&mut bytes).unwrap();
+        assert_eq!(t.challenge::<F>(DST_A), hasher.hash_to_field(&bytes, 1)[0]);
+
+        // points go in compressed; Fr encodes the same either way, so a G1 point pins the choice
+        let g = G1Affine::generator();
+        let mut p = Transcript::new();
+        p.absorb(&g).unwrap();
+        let mut compressed = Vec::new();
+        g.serialize_compressed(&mut compressed).unwrap();
+        assert_eq!(p.challenge::<F>(DST_A), hasher.hash_to_field(&compressed, 1)[0]);
     }
 }

@@ -1795,4 +1795,289 @@ mod tests {
             }
         }
     }
+
+    /// a universe, a signer set of every other party, and the honest witness for it
+    fn honest_setup(
+        n: usize,
+        msg: &[u8],
+    ) -> (CRS, AggregationKey, VerificationKey, HashMap<usize, PartialSignature>, Witness) {
+        let (crs, ak, vk, sks, _) = sample_universe(n);
+        let sigs = sign_all(msg, &sks, (0..n - 1).step_by(2));
+        let witness = assemble_witness(&ak, &sigs).unwrap();
+        (crs, ak, vk, sigs, witness)
+    }
+
+    /// Proves a tampered witness and checks that the merged relation, and only the merged
+    /// relation, catches it. Every other check passes, so without the merged relation the
+    /// signature would verify. The claim must clear the threshold, or verify would reject
+    /// it for that alone.
+    fn assert_only_merged_relation_rejects(
+        crs: &CRS,
+        ak: &AggregationKey,
+        vk: &VerificationKey,
+        msg: &[u8],
+        witness: &Witness,
+        threshold: (F, F),
+    ) {
+        let (π, exact) = prove(crs, ak, vk, witness).unwrap();
+        assert!(!exact, "a tampered witness cannot satisfy all four relations");
+
+        let (numerator, denominator) = threshold;
+        assert!(denominator * π.agg_weight > numerator * vk.total_weight);
+
+        assert_eq!(
+            run_all_checks(msg, vk, &π),
+            CheckOutcomes { merged_relation: false, ..CheckOutcomes::all_pass() }
+        );
+        assert!(!HinTS::verify(msg, vk, &π, threshold).unwrap());
+    }
+
+    /// one copy of the signature per field, with only that field changed
+    fn tampered_copies(π: &ThresholdSignature) -> Vec<(&'static str, ThresholdSignature)> {
+        let g1 = G1AffinePoint::generator();
+        let g2 = G2AffinePoint::generator();
+        let bump_g1 = |p: G1AffinePoint| (p + g1).into_affine();
+        let bump_g2 = |p: G2AffinePoint| (p + g2).into_affine();
+        let bump_f = |x: F| x + F::from(1);
+
+        let mut copies = vec![];
+        macro_rules! tamper {
+            ($field:ident, $change:expr) => {{
+                let mut copy = π.clone();
+                copy.$field = $change(copy.$field);
+                copies.push((stringify!($field), copy));
+            }};
+        }
+        tamper!(agg_pk, bump_g1);
+        tamper!(agg_weight, bump_f);
+        tamper!(agg_sig, bump_g2);
+        tamper!(b_of_tau_com, bump_g1);
+        tamper!(qx_of_tau_com, bump_g1);
+        tamper!(qx_of_tau_mul_tau_com, bump_g1);
+        tamper!(qz_of_tau_com, bump_g1);
+        tamper!(parsum_of_tau_com, bump_g1);
+        tamper!(q_mrg_of_tau_com, bump_g1);
+        tamper!(opening_proof_r, bump_g1);
+        tamper!(opening_proof_r_div_ω, bump_g1);
+        tamper!(parsum_of_r, bump_f);
+        tamper!(parsum_of_r_div_ω, bump_f);
+        tamper!(w_of_r, bump_f);
+        tamper!(b_of_r, bump_f);
+        tamper!(q_mrg_of_r, bump_f);
+        copies
+    }
+
+    /// An honest witness divides exactly and yields a signature that passes every check;
+    /// the attacks below start from this.
+    #[test]
+    fn test_honest_witness_proves_exactly() {
+        let msg = b"honest";
+        let (crs, ak, vk, _sigs, witness) = honest_setup(8, msg);
+        let (π, exact) = prove(&crs, &ak, &vk, &witness).unwrap();
+        assert!(exact);
+        assert_eq!(run_all_checks(msg, &vk, &π), CheckOutcomes::all_pass());
+    }
+
+    /// P1 stops weight inflation. Claiming more weight than the signers have moves the
+    /// reserved slot's -w, so the running sum no longer returns to zero by the recurrence: it
+    /// breaks at the reserved slot. P2, P3 and P4 still hold, and no other check sees w.
+    #[test]
+    fn test_merged_relation_rejects_weight_inflation() {
+        let msg = b"inflation";
+        let (crs, ak, vk, _sigs, mut witness) = honest_setup(8, msg);
+        witness.agg_weight += vk.total_weight;
+        assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)));
+    }
+
+    /// P2 stops a signer from being counted twice. A bit of 2 doubles that signer's weight in
+    /// the running sum; scaling the aggregate key, the signature and the hint sums to match
+    /// keeps the BLS check, the sumcheck and the degree check satisfied, since all three are
+    /// linear in the bitmap. P1, P3 and P4 hold too, so only P2 notices.
+    #[test]
+    fn test_merged_relation_rejects_double_counted_signer() {
+        let msg = b"double count";
+        let (crs, ak, vk, sigs, mut witness) = honest_setup(8, msg);
+        let n = ak.n;
+        let n_inv = F::from(1) / F::from(n as u64);
+        let i = 0; // honest_setup's signers are every other party, starting at 0
+
+        witness.bitmap[i] = F::from(2);
+        witness.agg_weight += ak.weights[i];
+        let mut weights = ak.weights.clone();
+        weights[n - 1] = F::from(0) - witness.agg_weight;
+        witness.parsum = running_sums(&weights, &witness.bitmap);
+        witness.agg_pk = (ak.pks[i].mul(n_inv) + witness.agg_pk).into_affine();
+        witness.agg_sig = (sigs[&i].mul(n_inv) + witness.agg_sig).into_affine();
+        witness.qz_of_tau_com = (witness.qz_of_tau_com + ak.qz_terms[i]).into_affine();
+        witness.qx_of_tau_com = (witness.qx_of_tau_com + ak.qx_terms[i]).into_affine();
+        witness.qx_of_tau_mul_tau_com =
+            (witness.qx_of_tau_mul_tau_com + ak.qx_mul_tau_terms[i]).into_affine();
+
+        assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)));
+    }
+
+    /// P3 pins the running sum's constant: shifting every running sum by the same amount
+    /// leaves the recurrence P1 intact. This gains an attacker nothing, since P1 and P4
+    /// already fix the weight, but it is one of the four relations and the merge must not
+    /// lose it.
+    #[test]
+    fn test_merged_relation_rejects_shifted_running_sum() {
+        let msg = b"shift";
+        let (crs, ak, vk, _sigs, mut witness) = honest_setup(8, msg);
+        for value in witness.parsum.iter_mut() {
+            *value += F::from(1);
+        }
+        assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)));
+    }
+
+    /// P4 stops a zero-weight signer from claiming any weight at all. With the reserved bit
+    /// cleared, the reserved slot's -w drops out of the running sum, so P1 to P3 hold for
+    /// every claimed w, and the BLS check, the sumcheck and the degree check never see w or
+    /// the reserved slot (whose key is zero). Without P4, one zero-weight partial signature
+    /// would make a majority signature.
+    #[test]
+    fn test_merged_relation_rejects_cleared_reserved_bit() {
+        let n = 8;
+        let msg = b"zero weight";
+        let (crs, _ak, _vk, sks, epks) = sample_universe(n);
+
+        // party 0 has no weight; everyone else carries the network
+        let mut weights = sample_weights(n - 1);
+        weights[0] = F::from(0);
+        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
+            (0..n - 1).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let (vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
+
+        // sanity: an honest signature that includes the zero-weight party still verifies
+        let honest = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, [0, 1])).unwrap();
+        assert!(HinTS::verify(msg, &vk, &honest, (F::from(0), F::from(1))).unwrap());
+
+        // the attack: only party 0 signs, the reserved bit is cleared, and the claim is everything
+        let mut witness = assemble_witness(&ak, &sign_all(msg, &sks, [0])).unwrap();
+        witness.bitmap[n - 1] = F::from(0);
+        witness.agg_weight = vk.total_weight;
+        let mut weights_adj = ak.weights.clone();
+        weights_adj[n - 1] = F::from(0) - witness.agg_weight;
+        witness.parsum = running_sums(&weights_adj, &witness.bitmap);
+        witness.qz_of_tau_com = inner_product(&ak.qz_terms, &witness.bitmap);
+        witness.qx_of_tau_com = inner_product(&ak.qx_terms, &witness.bitmap);
+        witness.qx_of_tau_mul_tau_com = inner_product(&ak.qx_mul_tau_terms, &witness.bitmap);
+
+        assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)));
+    }
+
+    /// every one of the 16 fields is load-bearing: changing any one of them is rejected
+    #[test]
+    fn test_verify_rejects_every_single_field_tampering() {
+        let msg = b"tamper";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let threshold = (F::from(0), F::from(1));
+        assert!(HinTS::verify(msg, &vk, &π, threshold).unwrap());
+
+        let copies = tampered_copies(&π);
+        assert_eq!(copies.len(), 16);
+        for (field, tampered) in copies {
+            assert!(!HinTS::verify(msg, &vk, &tampered, threshold).unwrap(), "{} tampered", field);
+        }
+    }
+
+    /// A merged quotient fits only the signer set and weights it was computed for: moving
+    /// one, commitment and evaluation together, onto another signature is rejected.
+    #[test]
+    fn test_verify_rejects_spliced_merged_quotient() {
+        let msg = b"splice";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let everyone = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let some = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, [1, 3, 5])).unwrap();
+        let threshold = (F::from(0), F::from(1));
+
+        // sanity: each donor verifies on its own; `some` is also an honest signer set
+        // without party 0, which the other honest signatures all include
+        assert!(HinTS::verify(msg, &vk, &everyone, threshold).unwrap());
+        assert!(HinTS::verify(msg, &vk, &some, threshold).unwrap());
+
+        let mut spliced = everyone.clone();
+        spliced.q_mrg_of_tau_com = some.q_mrg_of_tau_com;
+        spliced.q_mrg_of_r = some.q_mrg_of_r;
+        assert!(!HinTS::verify(msg, &vk, &spliced, threshold).unwrap());
+    }
+
+    /// Each Fiat-Shamir round absorbs exactly its own items: changing one moves that round's
+    /// challenge and every later one, and none earlier. In particular r depends on [Q_mrg],
+    /// which is what stops a prover from choosing the merged quotient after seeing r.
+    #[test]
+    fn test_transcript_rounds_bind_their_items() {
+        let msg = b"transcript";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let before = derive_challenges(&vk, &π).unwrap();
+
+        // the round that absorbs each field; 4 means no round does
+        let round_of = |field: &str| -> usize {
+            match field {
+                "agg_pk" | "agg_weight" | "b_of_tau_com" | "parsum_of_tau_com"
+                | "qx_of_tau_com" | "qz_of_tau_com" | "qx_of_tau_mul_tau_com" => 1,
+                "q_mrg_of_tau_com" => 2,
+                "parsum_of_r" | "parsum_of_r_div_ω" | "w_of_r" | "b_of_r" | "q_mrg_of_r" => 3,
+                "agg_sig" | "opening_proof_r" | "opening_proof_r_div_ω" => 4,
+                other => panic!("field {} is not classified", other),
+            }
+        };
+        for (field, tampered) in tampered_copies(&π) {
+            let after = derive_challenges(&vk, &tampered).unwrap();
+            let round = round_of(field);
+            assert_eq!(before.0 != after.0, round <= 1, "{}: χ_Q", field);
+            assert_eq!(before.1 != after.1, round <= 2, "{}: r", field);
+            assert_eq!(before.2 != after.2, round <= 3, "{}: χ_op", field);
+        }
+
+        // the whole verification key is part of round 1
+        let mut other_vk = vk.clone();
+        other_vk.total_weight += F::from(1);
+        let after = derive_challenges(&other_vk, &π).unwrap();
+        assert!(before.0 != after.0 && before.1 != after.1 && before.2 != after.2);
+    }
+
+    /// aggregate refuses inputs that cannot satisfy the relations, rather than emitting a
+    /// signature that fails verification: here, an aggregation key whose reserved slot
+    /// carries weight, which the running sum cannot reconcile with W
+    #[test]
+    fn test_aggregate_rejects_weight_on_reserved_slot() {
+        let msg = b"reserved";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let sigs = sign_all(msg, &sks, 0..7);
+        assert!(HinTS::aggregate(&crs, &ak, &vk, &sigs).is_ok());
+
+        let mut bad = ak.clone();
+        bad.weights[7] = F::from(1);
+        assert!(HinTS::aggregate(&crs, &bad, &vk, &sigs).is_err());
+    }
+
+    /// keys from two preprocess runs over the same parties do not combine: aggregate either
+    /// refuses, or produces a signature the other verification key rejects; nothing panics
+    #[test]
+    fn test_mismatched_keys_do_not_verify() {
+        let msg = b"mismatch";
+        let (crs, ak, _vk, sks, epks) = sample_universe(8);
+        let weights: Vec<F> = (0..7).map(|i| F::from(100 + i as u64)).collect();
+        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
+            (0..7).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let (other_vk, _other_ak) = HinTS::preprocess(8, &crs, &signer_info).unwrap();
+
+        let sigs = sign_all(msg, &sks, 0..7);
+        match HinTS::aggregate(&crs, &ak, &other_vk, &sigs) {
+            Err(_) => {}
+            Ok(π) => assert!(!HinTS::verify(msg, &other_vk, &π, (F::from(0), F::from(1))).unwrap()),
+        }
+    }
+
+    /// with no signers, aggregate still returns a signature, and verify rejects it
+    #[test]
+    fn test_empty_signer_set_does_not_verify() {
+        let msg = b"empty";
+        let (crs, ak, vk, _sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &HashMap::new()).unwrap();
+        assert!(!HinTS::verify(msg, &vk, &π, (F::from(0), F::from(1))).unwrap());
+    }
 }

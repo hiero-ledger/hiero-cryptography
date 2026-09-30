@@ -670,6 +670,9 @@ public class HintsLibraryBridgeTest {
 
         assertFalse(INSTANCE.verifyAggregate(null, HintsConstants.RANDOM_2, keys.verificationKey(), 1, 3));
         assertFalse(INSTANCE.verifyAggregate(EMPTY, HintsConstants.RANDOM_2, keys.verificationKey(), 1, 3));
+        // a signature in the old, 1632-byte four-quotient layout is rejected on its length alone
+        assertFalse(INSTANCE.verifyAggregate(
+                Arrays.copyOf(aggregateSignature, 1632), HintsConstants.RANDOM_2, keys.verificationKey(), 1, 3));
         assertFalse(INSTANCE.verifyAggregate(aggregateSignature, null, keys.verificationKey(), 1, 3));
         assertFalse(INSTANCE.verifyAggregate(aggregateSignature, EMPTY, keys.verificationKey(), 1, 3));
         assertFalse(INSTANCE.verifyAggregate(aggregateSignature, HintsConstants.RANDOM_2, null, 1, 3));

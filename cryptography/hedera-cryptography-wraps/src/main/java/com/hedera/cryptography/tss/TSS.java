@@ -11,7 +11,7 @@ import java.util.Arrays;
 public final class TSS {
 
     private static final int HINTS_VERIFICATION_KEY_LENGTH = 1096;
-    private static final int HINTS_SIGNATURE_LENGTH = 1632;
+    private static final int HINTS_SIGNATURE_LENGTH = HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES;
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 11368;
     private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 128;
 

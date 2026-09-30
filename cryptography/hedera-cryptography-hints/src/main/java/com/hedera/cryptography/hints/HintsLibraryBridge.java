@@ -21,7 +21,12 @@ public class HintsLibraryBridge {
     /** The minimum length of an aggregationKey = 48 prefix + at least 1 byte of data. */
     private static final int MIN_AGGREGATION_KEY_SIZE = 49;
 
-    private static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 1632;
+    /**
+     * The length of an aggregate signature in bytes: 9 G1 points (96 bytes each), 1 G2 point (192 bytes)
+     * and 6 scalars (32 bytes each), all uncompressed.
+     */
+    public static final int AGGREGATE_SIGNATURE_LENGTH_BYTES = 9 * 96 + 192 + 6 * 32;
+
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
     private static final int COMPRESSED_G1_LENGTH_BYTES = 48;
     private static final int COMPRESSED_G2_LENGTH_BYTES = 96;

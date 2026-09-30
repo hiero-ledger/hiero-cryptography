@@ -83,6 +83,13 @@ public class TSSTest {
                 IllegalArgumentException.class,
                 () -> TSS.composeSignature(
                         TSSTestConstants.HINTS_VERIFICATION_KEY, ONE, TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE));
+        // a hinTS signature in the old, 1632-byte layout no longer fits the composite
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> TSS.composeSignature(
+                        TSSTestConstants.HINTS_VERIFICATION_KEY,
+                        new byte[1632],
+                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE));
 
         assertThrows(
                 IllegalArgumentException.class,

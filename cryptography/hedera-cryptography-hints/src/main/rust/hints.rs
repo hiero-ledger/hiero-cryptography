@@ -1666,11 +1666,8 @@ mod tests {
             .fold(G1AffinePoint::zero(), |acc, (p, _)| (acc + p).into_affine());
         assert_eq!(inner_product(&ak.qz_terms, &bitmap), expected);
 
-        let expected_sum = ak
-            .qz_terms
-            .iter()
-            .fold(G1AffinePoint::zero(), |acc, p| (acc + p).into_affine());
-        assert_eq!(add(ak.qz_terms.clone()), expected_sum);
+        // qz terms sum to zero by construction; pks repeat one key: a non-zero sum that exercises doubling
+        assert_eq!(add(ak.pks.clone()), ak.pks.iter().fold(G1AffinePoint::zero(), |acc, p| (acc + p).into_affine()));
         assert_eq!(add(Vec::<G2AffinePoint>::new()), G2AffinePoint::zero());
     }
 }

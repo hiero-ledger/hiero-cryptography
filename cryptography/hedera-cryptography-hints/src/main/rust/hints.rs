@@ -1260,7 +1260,8 @@ fn compute_psw_poly(
     )
 }
 
-/// computes the inner product between a vector of group elements and bitvector
+/// computes the inner product between a vector of group elements and bitvector;
+/// the sum runs in projective coordinates and is normalized once, at the end
 fn inner_product<T: AffineRepr>(
     elements: &Vec<T>,
     bitmap: &Vec<F>
@@ -1269,14 +1270,14 @@ fn inner_product<T: AffineRepr>(
         .iter()
         .zip(bitmap.iter())
         .filter(|(_, &bit)| bit == F::from(1))
-        .fold(T::zero(), |acc, (elem, _)| acc.add(elem).into_affine())
+        .map(|(elem, _)| elem)
+        .sum::<T::Group>()
+        .into_affine()
 }
 
-/// adds up all the group elements in a collection
+/// adds up all the group elements in a collection, in projective coordinates
 fn add<T: AffineRepr>(elements: impl IntoIterator<Item = T>) -> T {
-    elements
-        .into_iter()
-        .fold(T::zero(), |acc, x| acc.add(&x).into_affine())
+    elements.into_iter().sum::<T::Group>().into_affine()
 }
 
 /// hashes a byte array to an elliptic curve group element
@@ -1648,5 +1649,28 @@ mod tests {
             bad_vk.n = bad_n;
             assert!(!HinTS::verify(msg, &bad_vk, &π, (F::from(1), F::from(2))).unwrap());
         }
+    }
+
+    /// inner_product and add now sum in projective coordinates; pin them against the plain
+    /// affine fold they replaced, including the empty sum
+    #[test]
+    fn test_group_sums_match_affine_fold() {
+        let (_crs, ak, _vk, _sks, _epks) = sample_universe(8);
+        let bitmap: Vec<F> = [1u64, 0, 1, 1, 0, 0, 1, 1].iter().map(|&b| F::from(b)).collect();
+
+        let expected = ak
+            .qz_terms
+            .iter()
+            .zip(bitmap.iter())
+            .filter(|(_, &bit)| bit == F::from(1))
+            .fold(G1AffinePoint::zero(), |acc, (p, _)| (acc + p).into_affine());
+        assert_eq!(inner_product(&ak.qz_terms, &bitmap), expected);
+
+        let expected_sum = ak
+            .qz_terms
+            .iter()
+            .fold(G1AffinePoint::zero(), |acc, p| (acc + p).into_affine());
+        assert_eq!(add(ak.qz_terms.clone()), expected_sum);
+        assert_eq!(add(Vec::<G2AffinePoint>::new()), G2AffinePoint::zero());
     }
 }

@@ -2,6 +2,7 @@
 package com.hedera.cryptography.tss;
 
 import static com.hedera.cryptography.wraps.WRAPSLibraryBridgeTest.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -353,6 +354,28 @@ public class TSSTest {
                                 TSSTestConstants.HINTS_SIGNATURE,
                                 TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                         EMPTY));
+
+        // Composites built around a hinTS signature of the old, 1632-byte length are rejected on
+        // their length alone. With the Schnorr signature, the AddressBook proof part comes out at
+        // 512 bytes, which is neither a WRAPS proof nor a Schnorr signature; with the WRAPS proof,
+        // the composite is too long.
+        final byte[] oldLengthHintsSignature = Arrays.copyOf(TSSTestConstants.HINTS_SIGNATURE, 1632);
+        final byte[] oldSchnorrComposite = concat(
+                TSSTestConstants.HINTS_VERIFICATION_KEY,
+                oldLengthHintsSignature,
+                TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE);
+        final byte[] oldWrapsComposite = concat(
+                TSSTestConstants.HINTS_VERIFICATION_KEY,
+                oldLengthHintsSignature,
+                TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF);
+        assertEquals(2856, oldSchnorrComposite.length);
+        assertEquals(14096, oldWrapsComposite.length);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> TSS.verifyTSS(TSSTestConstants.ADDRESS_BOOK_HASH, oldSchnorrComposite, TSSTestConstants.MESSAGE));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> TSS.verifyTSS(TSSTestConstants.ADDRESS_BOOK_HASH, oldWrapsComposite, TSSTestConstants.MESSAGE));
     }
 
     /**

@@ -1791,7 +1791,8 @@ mod tests {
                 );
                 assert_eq!(run_all_checks(msg, &vk, &π), CheckOutcomes::all_pass(), "n = {}, {}", n, label);
                 // every party shares one key, so BLS pins how many parties signed but not which;
-                // the weights differ per party, so the claimed weight pins which were credited
+                // weights vary across parties, so the claimed weight catches mis-credits between
+                // parties of different weight
                 assert_eq!(
                     π.agg_weight,
                     sigs.keys().fold(F::from(0), |acc, &i| acc + ak.weights[i]),
@@ -1989,9 +1990,12 @@ mod tests {
 
     /// P4 stops a zero-weight signer from claiming any weight at all. With the reserved bit
     /// cleared, the reserved slot's -w drops out of the running sum, so P1 to P3 hold for
-    /// every claimed w, and the BLS check, the sumcheck and the degree check never see w or
-    /// the reserved slot (whose key is zero). Without P4, one zero-weight partial signature
-    /// would make a majority signature.
+    /// every claimed w, and the BLS check, the sumcheck and the degree check never see w.
+    /// The sumcheck does see the reserved slot: qz_terms[n-1] carries the other parties'
+    /// cross terms, so clearing the bit changes Q_z, which is why the test recomputes the
+    /// hint sums for the new bitmap. With them recomputed it holds, since the reserved
+    /// slot's key is zero and the aggregate key is unchanged. Without P4, one zero-weight
+    /// partial signature would make a majority signature.
     #[test]
     fn test_merged_relation_rejects_cleared_reserved_bit() {
         let n = 8;
@@ -2040,8 +2044,10 @@ mod tests {
         }
     }
 
-    /// A merged quotient fits only the signer set and weights it was computed for: moving
-    /// one, commitment and evaluation together, onto another signature is rejected.
+    /// A merged quotient, commitment and evaluation together, can't be moved from one
+    /// signature onto another. [Q_mrg(τ)]_1 is absorbed in round 2, so the splice moves r,
+    /// and the evaluations and opening proofs in the spliced signature, all made at an
+    /// earlier r, fail at the new one.
     #[test]
     fn test_verify_rejects_spliced_merged_quotient() {
         let msg = b"splice";
@@ -2141,8 +2147,10 @@ mod tests {
         assert!(matches!(HinTS::aggregate(&crs, &bad, &vk, &sigs), Err(HinTSError::InvalidInput(_))));
     }
 
-    /// keys from two preprocess runs over the same parties do not combine: aggregate either
-    /// refuses, or produces a signature the other verification key rejects; nothing panics
+    /// keys preprocessed for the same parties with different weights do not combine:
+    /// aggregate either refuses, or produces a signature the other verification key rejects;
+    /// nothing panics. The weights are what differ: preprocess is deterministic, so the same
+    /// weights would give the same keys
     #[test]
     fn test_mismatched_keys_do_not_verify() {
         let msg = b"mismatch";

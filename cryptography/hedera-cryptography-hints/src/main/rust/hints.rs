@@ -1130,6 +1130,10 @@ fn merged_relation_check(
     // this takes logarithmic computation, but concretely efficient
     let vanishing_of_r: F = r.pow([vk.n as u64]) - F::from(1);
 
+    // Z(r) = 0 exactly when r is in the domain, and at r = ω^{n-1} the division below would
+    // panic; r is a Fiat-Shamir output, so this has probability about n/2^255. Fail closed.
+    if vanishing_of_r == F::from(0) { return false; }
+
     // compute L_{n-1}(r) using the relation L_i(x) = Z_V(x) / ( Z_V'(x) (x - ω^i) )
     // where Z_V'(x)^-1 = x / N for N = |V|.
     let ω_pow_n_minus_1 = ω.pow([(vk.n as u64) - 1]);
@@ -2170,5 +2174,24 @@ mod tests {
             &crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)),
             CheckOutcomes { degree: false, ..CheckOutcomes::all_pass() },
         );
+    }
+
+    /// r is a Fiat-Shamir output, so it lands in the domain only with probability about
+    /// n/2^255. There Z(r) = 0, and at r = ω^{n-1} computing L_{n-1}(r) divides by zero,
+    /// which panics in ark-ff; the merged-relation check must return false instead. It is
+    /// called directly, since no signature can steer verify's r there.
+    #[test]
+    fn test_merged_relation_check_rejects_degenerate_r() {
+        let msg = b"degenerate r";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let (χ_q, r, _χ_op) = derive_challenges(&vk, &π).unwrap();
+
+        // sanity: at its own r, the honest signature satisfies the merged relation
+        assert!(merged_relation_check(&vk, &π, ω, χ_q, r));
+
+        let ω_pow_n_minus_1 = ω.pow([(vk.n as u64) - 1]);
+        assert!(!merged_relation_check(&vk, &π, ω, χ_q, ω_pow_n_minus_1));
     }
 }

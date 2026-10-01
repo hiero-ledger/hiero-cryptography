@@ -1811,6 +1811,34 @@ mod tests {
         (crs, ak, vk, sigs, witness)
     }
 
+    /// The slots where each of P1..P4 fails, as [P1, P2, P3, P4]. Each relation is evaluated
+    /// at every domain point straight from the witness's values and the aggregation key's
+    /// weights, not from any polynomial. Slot i is ω^i, so L_{n-1}(ω^i) = [i = n-1], and:
+    ///   P1: PS(i) - PS(i-1 mod n) = (W(i) - w·[i = n-1])·b(i), with W(i) = ak.weights[i]
+    ///   P2: b(i)·b(i) = b(i)
+    ///   P3: [i = n-1]·PS(i) = 0
+    ///   P4: [i = n-1]·(b(i) - 1) = 0
+    fn failing_slots(ak: &AggregationKey, witness: &Witness) -> [Vec<usize>; 4] {
+        let n = ak.n;
+        let (b, ps, w) = (&witness.bitmap, &witness.parsum, witness.agg_weight);
+        let reserved = |i: usize| F::from(i == n - 1);
+        let mut failing: [Vec<usize>; 4] = Default::default();
+        for i in 0..n {
+            let relations = [
+                ps[i] - ps[(i + n - 1) % n] - (ak.weights[i] - w * reserved(i)) * b[i],
+                b[i] * b[i] - b[i],
+                reserved(i) * ps[i],
+                reserved(i) * (b[i] - F::from(1)),
+            ];
+            for (p, value) in relations.iter().enumerate() {
+                if *value != F::from(0) {
+                    failing[p].push(i);
+                }
+            }
+        }
+        failing
+    }
+
     /// Proves a tampered witness and checks that the merged relation, and only the merged
     /// relation, catches it. Every other check passes, so without the merged relation the
     /// signature would verify. The claim must clear the threshold, or verify would reject
@@ -1877,6 +1905,7 @@ mod tests {
     fn test_honest_witness_proves_exactly() {
         let msg = b"honest";
         let (crs, ak, vk, _sigs, witness) = honest_setup(8, msg);
+        assert_eq!(failing_slots(&ak, &witness), [vec![], vec![], vec![], vec![]]);
         let (π, exact) = prove(&crs, &ak, &vk, &witness).unwrap();
         assert!(exact);
         assert_eq!(run_all_checks(msg, &vk, &π), CheckOutcomes::all_pass());
@@ -1890,6 +1919,27 @@ mod tests {
         let msg = b"inflation";
         let (crs, ak, vk, _sigs, mut witness) = honest_setup(8, msg);
         witness.agg_weight += vk.total_weight;
+        assert_eq!(failing_slots(&ak, &witness), [vec![ak.n - 1], vec![], vec![], vec![]]);
+        assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)));
+    }
+
+    /// P1 is enforced at the wrap-around ω^0 too, and that step, PS(ω^0) - PS(ω^{n-1}) =
+    /// b_0·w_0, pins where the running sum starts. Without it, P1 on ω^1..ω^{n-1}, P3 and P4
+    /// give only w = PS(ω^0) + Σ_{i=1}^{n-2} b_i·w_i, with PS(ω^0) free. So claim δ more
+    /// weight, and start the running sum δ higher to match: every later step and the zero at
+    /// the reserved slot (P3) still hold, and P1 breaks at slot 0 alone.
+    #[test]
+    fn test_merged_relation_rejects_weight_inflation_at_wrap_around() {
+        let msg = b"wrap-around";
+        let (crs, ak, vk, _sigs, mut witness) = honest_setup(8, msg);
+        let n = ak.n;
+        let δ = vk.total_weight;
+        witness.agg_weight += δ;
+        let mut weights = ak.weights.clone();
+        weights[n - 1] = F::from(0) - witness.agg_weight;
+        witness.parsum = running_sums(&weights, &witness.bitmap).into_iter().map(|s| s + δ).collect();
+        assert_eq!(witness.parsum[n - 1], F::from(0)); // P3 holds
+        assert_eq!(failing_slots(&ak, &witness), [vec![0], vec![], vec![], vec![]]);
         assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)));
     }
 
@@ -1917,6 +1967,7 @@ mod tests {
         witness.qx_of_tau_mul_tau_com =
             (witness.qx_of_tau_mul_tau_com + ak.qx_mul_tau_terms[i]).into_affine();
 
+        assert_eq!(failing_slots(&ak, &witness), [vec![], vec![i], vec![], vec![]]);
         assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)));
     }
 
@@ -1931,6 +1982,7 @@ mod tests {
         for value in witness.parsum.iter_mut() {
             *value += F::from(1);
         }
+        assert_eq!(failing_slots(&ak, &witness), [vec![], vec![], vec![ak.n - 1], vec![]]);
         assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(0), F::from(1)));
     }
 
@@ -1967,6 +2019,7 @@ mod tests {
         witness.qx_of_tau_com = inner_product(&ak.qx_terms, &witness.bitmap);
         witness.qx_of_tau_mul_tau_com = inner_product(&ak.qx_mul_tau_terms, &witness.bitmap);
 
+        assert_eq!(failing_slots(&ak, &witness), [vec![], vec![], vec![], vec![n - 1]]);
         assert_only_merged_relation_rejects(&crs, &ak, &vk, msg, &witness, (F::from(1), F::from(2)));
     }
 

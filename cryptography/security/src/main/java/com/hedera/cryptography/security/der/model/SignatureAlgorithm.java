@@ -18,7 +18,8 @@ public record SignatureAlgorithm(String signatureAlgorithm, OID oid, boolean nee
         } else if ("SHA384withECDSA".equalsIgnoreCase(signatureAlgorithm)) {
             oid = new OID("1.2.840.10045.4.3.3");
             needsNullParam = false;
-        } else if ("Ed25519".equalsIgnoreCase(signatureAlgorithm)) {
+        } else if ("Ed25519".equalsIgnoreCase(signatureAlgorithm) || "EdDSA".equalsIgnoreCase(signatureAlgorithm)) {
+            // Bouncy Castle uses Ed25519, while JDK refers to this as EdDSA.
             oid = new OID("1.3.101.112");
             needsNullParam = false;
         } else {

@@ -686,7 +686,8 @@ impl HinTS {
         Ok(lhs == rhs)
     }
 
-    /// aggregates partial signatures to construct a threshold signature
+    /// aggregates partial signatures to construct a threshold signature; returns InvalidInput,
+    /// rather than a signature that cannot verify, if the inputs don't satisfy the hinTS relations
     pub fn aggregate(
         crs: &CRS,
         ak: &AggregationKey,
@@ -2137,7 +2138,7 @@ mod tests {
 
         let mut bad = ak.clone();
         bad.weights[7] = F::from(1);
-        assert!(HinTS::aggregate(&crs, &bad, &vk, &sigs).is_err());
+        assert!(matches!(HinTS::aggregate(&crs, &bad, &vk, &sigs), Err(HinTSError::InvalidInput(_))));
     }
 
     /// keys from two preprocess runs over the same parties do not combine: aggregate either

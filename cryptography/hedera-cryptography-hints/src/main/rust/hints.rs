@@ -944,7 +944,7 @@ fn prove(
     let q_mrg_of_tau_com = KZG::commit_g1(crs, &q_mrg_of_x)?;
 
     // Round 2: r binds [Q_mrg(τ)]_1, so the merged quotient cannot be chosen once r is known
-    transcript.absorb(&q_mrg_of_tau_com)?;
+    absorb_round_2(&mut transcript, &q_mrg_of_tau_com)?;
     let r: F = transcript.challenge(DST_EVALUATION_POINT);
     let r_div_ω: F = r / ω;
 
@@ -1056,6 +1056,15 @@ fn absorb_round_1(
     transcript.absorb(qx_of_tau_mul_tau_com)
 }
 
+/// Round 2 of the transcript (T_2): the commitment to the merged quotient. r is drawn only
+/// once it is fixed, so the quotient cannot be chosen to fit r.
+fn absorb_round_2(
+    transcript: &mut Transcript,
+    q_mrg_of_tau_com: &G1AffinePoint,
+) -> Result<(), HinTSError> {
+    transcript.absorb(q_mrg_of_tau_com)
+}
+
 /// Round 3 of the transcript (T_3): the claimed evaluations. χ_op is drawn only once they
 /// are fixed, so they cannot be adapted to the coefficient that batches their openings.
 fn absorb_round_3(
@@ -1093,7 +1102,7 @@ fn derive_challenges(
     )?;
     let χ_q: F = transcript.challenge(DST_QUOTIENT_MERGE);
 
-    transcript.absorb(&π.q_mrg_of_tau_com)?;
+    absorb_round_2(&mut transcript, &π.q_mrg_of_tau_com)?;
     let r: F = transcript.challenge(DST_EVALUATION_POINT);
 
     absorb_round_3(

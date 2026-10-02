@@ -79,7 +79,7 @@ fn main() {
   );
   let ledger_id = round_trip(
     "compute_rotation_message return: genesis ledger ID bytes",
-    WRAPS::compute_rotation_message(&genesis_ab, vec![0u8; 1480]).unwrap(),
+    WRAPS::compute_rotation_message(&genesis_ab, vec![0u8; 1248]).unwrap(),
   );
 
   // A seat can be held open with the sentinel key: the point at infinity, which
@@ -155,7 +155,7 @@ fn main() {
     };
     let hints_vk = round_trip(
       "compute_hints_vk_hash / compute_rotation_message input: hints_vk Vec<u8>",
-      vec![i as u8; 1480],
+      vec![i as u8; 1248],
     );
     let hints_vk_hash = round_trip(
       "compute_hints_vk_hash return: HintsVKHash",

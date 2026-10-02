@@ -80,7 +80,7 @@ fn main() {
   );
   let ledger_id = round_trip(
     "compute_rotation_message return: genesis ledger ID bytes",
-    &WRAPS::compute_rotation_message(&previous.0, vec![0u8; 1480]).expect("valid genesis book"),
+    &WRAPS::compute_rotation_message(&previous.0, vec![0u8; 1248]).expect("valid genesis book"),
   );
   let mut running_proof: Option<Vec<u8>> = None;
 
@@ -111,7 +111,7 @@ fn main() {
     );
     let hints_vk = round_trip(
       "compute_hints_vk_hash input: hints_vk",
-      &vec![rotation as u8; 1480],
+      &vec![rotation as u8; 1248],
     );
     let hints_vk_hash = round_trip(
       "compute_hints_vk_hash return: HintsVKHash",

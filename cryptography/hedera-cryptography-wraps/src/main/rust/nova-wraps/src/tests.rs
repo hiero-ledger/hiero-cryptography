@@ -2057,7 +2057,7 @@ fn artifact_sizes() {
   // One genesis rotation, to get a proof of each kind.
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
-  let hints_vk = [0u8; 1480];
+  let hints_vk = [0u8; 1248];
   let message = WRAPS::compute_rotation_message(&genesis_ab, hints_vk).unwrap();
   let multisignature = threshold_sign(
     &message,
@@ -2125,7 +2125,7 @@ fn wraps_simulation() {
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
-  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1480]).unwrap();
+  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1248]).unwrap();
 
   let mut prev = (genesis_ab, genesis_keys);
   let mut running_proof: Option<Vec<u8>> = None;
@@ -2138,7 +2138,7 @@ fn wraps_simulation() {
     } else {
       random_address_book()
     };
-    let hints_vk = [i as u8; 1480];
+    let hints_vk = [i as u8; 1248];
     let message = WRAPS::compute_rotation_message(&next.0, hints_vk).unwrap();
 
     let multisignature = threshold_sign(
@@ -2192,7 +2192,7 @@ fn wraps_simulation() {
       let mut wrong_ledger: RotationMessage<E2> = decode(&ledger_id).unwrap();
       wrong_ledger[0] = wrong_genesis;
       let wrong_ledger_id = encode(&wrong_ledger).unwrap();
-      let wrong_hints = [0xffu8; 1480];
+      let wrong_hints = [0xffu8; 1248];
       for (ledger, hints) in [
         (&wrong_ledger_id, &hints_vk),
         (&ledger_id, &wrong_hints),
@@ -2375,7 +2375,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
-  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1480]).unwrap();
+  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1248]).unwrap();
 
   let mut prev = (genesis_ab, genesis_keys);
   let mut running_proof: Option<Vec<u8>> = None;
@@ -2387,7 +2387,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
     } else {
       random_address_book()
     };
-    let hints_vk = [i as u8; 1480];
+    let hints_vk = [i as u8; 1248];
     let message = WRAPS::compute_rotation_message(&next.0, hints_vk).unwrap();
 
     let has_sufficient_weight = i < SUFFICIENT_STEPS;

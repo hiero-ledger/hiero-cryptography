@@ -170,7 +170,7 @@ public class TSSTest {
 
         TSS.setAddressBook(TSSTestConstants.SCHNORR_PUBLIC_KEYS, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
         assertTrue(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
@@ -179,7 +179,7 @@ public class TSSTest {
 
         TSS.setAddressBook(null, null, null);
         assertTrue(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
@@ -188,35 +188,35 @@ public class TSSTest {
 
         // Then unhappy cases, starting with unverifiable data
         assertFalse(TSS.verifyTSS(
-                rnd(TSSTestConstants.ADDRESS_BOOK_HASH, rnd),
+                rnd(TSSTestConstants.LEDGER_ID, rnd),
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
                         TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         rnd(TSSTestConstants.HINTS_VERIFICATION_KEY, rnd),
                         TSSTestConstants.HINTS_SIGNATURE,
                         TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         rnd(TSSTestConstants.HINTS_SIGNATURE, rnd),
                         TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
                         rnd(TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF, rnd)),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
@@ -225,35 +225,35 @@ public class TSSTest {
 
         TSS.setAddressBook(TSSTestConstants.SCHNORR_PUBLIC_KEYS, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
         assertFalse(TSS.verifyTSS(
-                rnd(TSSTestConstants.ADDRESS_BOOK_HASH, rnd),
+                rnd(TSSTestConstants.LEDGER_ID, rnd),
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
                         TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         rnd(TSSTestConstants.HINTS_VERIFICATION_KEY, rnd),
                         TSSTestConstants.HINTS_SIGNATURE,
                         TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         rnd(TSSTestConstants.HINTS_SIGNATURE, rnd),
                         TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
                         rnd(TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE, rnd)),
                 TSSTestConstants.MESSAGE));
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
@@ -268,7 +268,7 @@ public class TSSTest {
         }
         TSS.setAddressBook(badSchnorrKeys, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
         assertFalse(TSS.verifyTSS(
-                TSSTestConstants.ADDRESS_BOOK_HASH,
+                TSSTestConstants.LEDGER_ID,
                 concat(
                         TSSTestConstants.HINTS_VERIFICATION_KEY,
                         TSSTestConstants.HINTS_SIGNATURE,
@@ -280,7 +280,7 @@ public class TSSTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> TSS.verifyTSS(
-                        TSSTestConstants.ADDRESS_BOOK_HASH,
+                        TSSTestConstants.LEDGER_ID,
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
@@ -317,20 +317,20 @@ public class TSSTest {
                         TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TSS.verifyTSS(TSSTestConstants.ADDRESS_BOOK_HASH, null, TSSTestConstants.MESSAGE));
+                () -> TSS.verifyTSS(TSSTestConstants.LEDGER_ID, null, TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> TSS.verifyTSS(TSSTestConstants.ADDRESS_BOOK_HASH, EMPTY, TSSTestConstants.MESSAGE));
+                () -> TSS.verifyTSS(TSSTestConstants.LEDGER_ID, EMPTY, TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.verifyTSS(
-                        TSSTestConstants.ADDRESS_BOOK_HASH,
+                        TSSTestConstants.LEDGER_ID,
                         concat(TSSTestConstants.HINTS_VERIFICATION_KEY, new byte[] {1, 2, 3}, new byte[] {1, 2, 3}),
                         TSSTestConstants.MESSAGE));
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.verifyTSS(
-                        TSSTestConstants.ADDRESS_BOOK_HASH,
+                        TSSTestConstants.LEDGER_ID,
                         concat(TSSTestConstants.HINTS_VERIFICATION_KEY, TSSTestConstants.HINTS_SIGNATURE, new byte[] {
                             1, 2, 3
                         }),
@@ -338,7 +338,7 @@ public class TSSTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.verifyTSS(
-                        TSSTestConstants.ADDRESS_BOOK_HASH,
+                        TSSTestConstants.LEDGER_ID,
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
@@ -347,7 +347,7 @@ public class TSSTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.verifyTSS(
-                        TSSTestConstants.ADDRESS_BOOK_HASH,
+                        TSSTestConstants.LEDGER_ID,
                         concat(
                                 TSSTestConstants.HINTS_VERIFICATION_KEY,
                                 TSSTestConstants.HINTS_SIGNATURE,
@@ -378,10 +378,6 @@ public class TSSTest {
                     "    " + i + ": " + Arrays.toString(genesisNetwork.publicKeys()[i]));
         }
 
-        final byte[] genesisAddressBookHash =
-                WRAPS.hashAddressBook(genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds());
-        System.err.println("ADDRESS_BOOK_HASH = " + Arrays.toString(genesisAddressBookHash));
-
         final int N = 8;
 
         final byte[] crs = HINTS.initCRS((short) N);
@@ -400,6 +396,17 @@ public class TSSTest {
 
         System.err.println("HINTS_VERIFICATION_KEY = " + Arrays.toString(keys.verificationKey()));
 
+        final byte[] genesisAddressBookHash =
+                WRAPS.hashAddressBook(genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds());
+        System.err.println("ADDRESS_BOOK_HASH = " + Arrays.toString(genesisAddressBookHash));
+
+        final byte[] ledgerID = WRAPS.computeNetworkID(
+                genesisNetwork.publicKeys(),
+                genesisNetwork.weights(),
+                genesisNetwork.nodeIds(),
+                keys.verificationKey());
+        System.err.println("LEDGER_ID = " + Arrays.toString(ledgerID));
+
         // Since we use the same key, the signature is also the same for all:
         final byte[] blsSignature = HINTS.signBls(TSSTestConstants.MESSAGE, secretKey);
         final byte[] hintsSignature = HINTS.aggregateSignatures(
@@ -408,7 +415,7 @@ public class TSSTest {
                 });
         System.err.println("HINTS_SIGNATURE = " + Arrays.toString(hintsSignature));
 
-        final byte[] message0 = WRAPS.formatRotationMessage(
+        final byte[] message0 = WRAPS.computeNetworkID(
                 genesisNetwork.publicKeys(),
                 genesisNetwork.weights(),
                 genesisNetwork.nodeIds(),

@@ -17,20 +17,17 @@ pub const MAX_AB_SIZE: usize = 64;
 /// See [`crate::wraps::WRAPS::signing_protocol`].
 pub const ENTROPY_SIZE: usize = 32;
 
-/// Number of hints verification-key bytes packed into each little-endian field input.
-pub(crate) const HINTS_VK_CHUNK_SIZE: usize = 8;
-
 /// Bit width of each seat's weight and the committee's total effective weight.
 pub(crate) const WEIGHT_BITS: usize = u64::BITS as usize;
 
 /// Poseidon domain separator for `H(ab)`, the address-book commitment.
 pub(crate) const DS_ADDRESS_BOOK: u32 = 1;
 
-/// Poseidon domain separator for the hash of a serialized hints verification key.
-pub(crate) const DS_HINTS_VK: u32 = 2;
-
 /// Poseidon domain separator for the Schnorr challenge `H(pk, r, m)`.
 pub(crate) const DS_CHALLENGE: u32 = 3;
+
+/// Domain separator for the SHA-256 hash of a hints verification key.
+pub(crate) const DST_HINTS_VK: &[u8] = b"WRAPS-hints-vk-v1";
 
 /// Domain separator for a native SHA-256 proof-of-knowledge challenge with scalar reduction.
 pub(crate) const DST_POK: &[u8] = b"WRAPS-schnorr-pok-sha256-mod-v4";

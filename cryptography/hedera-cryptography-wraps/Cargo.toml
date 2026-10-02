@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "src/main/rust/folding-schemes",
+    #"src/main/rust/folding-schemes",
     #"src/main/rust/wraps",
     "src/main/rust/nova-wraps",
-    "src/main/rust/ceremony",
+    #"src/main/rust/ceremony",
 ]
 resolver = "2"
 

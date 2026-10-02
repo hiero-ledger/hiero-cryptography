@@ -35,6 +35,25 @@ from public parameters; verification borrows that prepared object.
 Padding, signing-subset selection, and the underlying cryptographic helpers are
 internal implementation details, outside the public API.
 
+## Ledger ID
+
+A ledger ID is the byte array returned by `WRAPS::compute_rotation_message` for the
+genesis address book and genesis hints verification key:
+
+```rust
+let ledger_id: Vec<u8> = WRAPS::compute_rotation_message(&genesis_ab, &genesis_hints_vk)?;
+```
+
+It encodes `[H(genesis_ab), H(genesis_hints_vk)]` as a `RotationMessage<E2>`.
+Retain these bytes across rotations and pass them directly to
+`verify_compressed_wraps_proof` and `verify_uncompressed_wraps_proof`, without
+re-encoding the vector. Both methods decode the ledger ID and use its first element
+as the expected genesis address-book hash. They do not check its genesis hints-key
+hash; the separate `hints_vk` argument specifies the expected current hints key.
+Malformed ledger IDs, including truncated encodings or trailing bytes, return an error.
+Proof construction and the Java bridge continue to accept the genesis address-book
+hash directly.
+
 ## Layout
 
 |                     |                                                                                                                                                             |
@@ -77,23 +96,24 @@ directly through Nova. Once prepared, that key owns everything needed for compre
 verification and does not retain a reference to the public parameters:
 
 ```rust
-use novawraps::{CompressedVerifyingKey, PublicParams, WRAPS};
+use wraps::{CompressedVerifyingKey, PublicParams, WRAPS};
 
 let pp: PublicParams = WRAPS::load_public_params(&ptau_dir)?;
 let compact_vk: Vec<u8> = WRAPS::get_compressed_verification_key(&pp)?;
 
 // On a compressed verifier, prepare once and retain the key across proof checks.
 let compressed_vk: CompressedVerifyingKey = WRAPS::setup_compressed_verifier(&pp)?;
+let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, &genesis_hints_vk)?;
 
 let (running, compressed) = WRAPS::construct_wraps_proof(
     &pp, &genesis_hash, &prev_ab, &next_ab,
     previous_running_proof, hints_vk, &multisignature,
 )?;
 let running_valid = WRAPS::verify_uncompressed_wraps_proof(
-    &pp, &running, &genesis_hash, hints_vk,
+    &pp, &running, &ledger_id, hints_vk,
 )?;
 let compressed_valid = WRAPS::verify_compressed_wraps_proof(
-    &compressed_vk, &compressed, &genesis_hash, hints_vk,
+    &compressed_vk, &compressed, &ledger_id, hints_vk,
 )?;
 ```
 
@@ -140,7 +160,7 @@ to `load_public_params` does not change the current parameter, key, or proof enc
 Run `stats` for three linked rotations, each signed by 2-of-3 members of
 the outgoing committee. The first rotates the genesis book onto itself; the next
 two introduce fresh successor books. Each step extends the running proof and verifies
-both the running and compressed proofs against the original genesis hash:
+both the running and compressed proofs against the original ledger ID:
 
 ```bash
 cargo run --release -p novawraps --example stats
@@ -190,7 +210,7 @@ The typed payloads and `RoundMessage<E>` remain public and serializable for insp
 For example, given the result of a round-1 call:
 
 ```rust
-use novawraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
+use wraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
 
 let SigningProtocolObject::ProtocolMessage(bytes) = round1_result else {
     panic!("round 1 must return a broadcast message");
@@ -316,15 +336,13 @@ all supported targets.
 
 ## Hashes
 
-Address-book commitments, rotation signature challenges, and hints verification-key
-hashes use Poseidon. `AddressBookHash<E>` and `HintsVKHash<E>` name the two hashes in
-each rotation message and IVC state. `WRAPS::compute_hints_vk_hash` computes a
-`HintsVKHash<E2>` from serialized hints verification-key bytes.
-The hints key is packed into little-endian 8-byte words, with the last word zero-padded
-and the original byte length absorbed first. This replaces the earlier 31-byte packing:
-keys longer than 8 bytes have new hashes, so rotation signatures and proofs bound to
-their old hashes must be regenerated. The hints-key packing change itself does not
-change the circuit or Nova setup keys; the weight constraints described above do.
+Address-book commitments and rotation signature challenges use Poseidon.
+`AddressBookHash<E>` and `HintsVKHash<E>` name the two hashes in each rotation message
+and IVC state. `WRAPS::compute_hints_vk_hash` computes SHA-256 of
+`b"WRAPS-hints-vk-v1" || hints_vk_bytes`, interprets the entire digest as a big-endian integer, and
+reduces it modulo the `E2::Base` field prime to obtain a `HintsVKHash<E2>`.
+Rotation signatures and proofs bound to the old Poseidon or unprefixed SHA-256 hints
+hashes must be regenerated. This hash change does not change the circuit or Nova setup keys.
 
 Native key proofs of knowledge use SHA-256 under the domain
 `WRAPS-schnorr-pok-sha256-mod-v4`, followed by the generator, public key, and commitment.

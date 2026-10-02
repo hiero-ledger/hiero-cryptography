@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 
 use crate::{jni_util, WRAPS, SigningProtocolPhase, ENTROPY_SIZE, SigningProtocolMessage, SigningProtocolObject, SchnorrMultiSignature, AddressBook, AddressBookHash, SchnorrSecretKey, E2, HintsVKHash, PublicParams, CompressedVerifyingKey};
 use crate::jni_util::deserialize_from_jbyte_array;
+use crate::wraps::CompressedWrapsProof;
+use crate::{decode, encode};
 
 //const SECRET_KEY_LENGTH: usize = 32;
 
@@ -379,11 +381,11 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
     env: JNIEnv,
     _instance: JObject,
     compressed_proof_jarray: JByteArray,
-    ab_genesis_hash_jarray: JByteArray,
+    ledger_id_jarray: JByteArray,
     tss_vk_jarray: JByteArray,
 ) -> jboolean {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let ab_genesis_hash: AddressBookHash<E2> = match deserialize_from_jbyte_array(&env, &ab_genesis_hash_jarray) {
+        let ledger_id_vec: Vec<u8> = match env.convert_byte_array(&ledger_id_jarray) {
             Ok(val) => val,
             Err(_) => return jboolean::from(false)
         };
@@ -416,7 +418,7 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             None => return jboolean::from(false)
         };
 
-        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ab_genesis_hash, tss_vk_vec) {
+        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ledger_id_vec, tss_vk_vec) {
             Ok(val) => jboolean::from(val),
             Err(_) => return jboolean::from(false)
         }

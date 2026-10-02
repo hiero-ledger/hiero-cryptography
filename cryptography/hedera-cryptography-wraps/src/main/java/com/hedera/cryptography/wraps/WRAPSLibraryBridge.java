@@ -20,7 +20,7 @@ public class WRAPSLibraryBridge {
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
 
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 11368;
-    private static final int ADDRESS_BOOK_HASH_LENGTH_BYTES = 32;
+    private static final int LEDGER_ID_LENGTH_BYTES = 64;
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
 
     static {
@@ -380,14 +380,20 @@ public class WRAPSLibraryBridge {
     private native byte[] hashArrayImpl(byte[] array);
 
     /**
-     * Constructs a rotation message by concatenating the hash of the next address book with the hash
+     * Constructs a network identifier by concatenating the hash of an address book with the hash
      * of the hinTS VerificationKey.
+     * When computed using the TSS genesis address book and hinTS key hash, the value becomes
+     * the ledgerID of that network.
+     * As the network changes, all subsequent networkIDs can be proven to "inherit"
+     * from that ledgerID using their WRAPS proofs (see `constructWrapsProof()`).
+     *
      * @param schnorrPublicKeys Schnorr public keys for nodes in the next address book
      * @param weights corresponding non-negative weights of the nodes in the address book
+     * @param nodeIds corresponding nodeIds in the address book
      * @param hintsVerificationKey the hinTS VerificationKey
-     * @return
+     * @return a byte array that identifies a network. The length is 64 bytes.
      */
-    public byte[] formatRotationMessage(
+    public byte[] computeNetworkID(
             byte[][] schnorrPublicKeys, long[] weights, long[] nodeIds, byte[] hintsVerificationKey) {
         if (schnorrPublicKeys == null
                 || weights == null
@@ -500,29 +506,28 @@ public class WRAPSLibraryBridge {
      * Note: Nova and Decider keys are managed internally in the native code for performance reasons.
      *
      * @param compressedProof Compressed proof bundle returned by `constructWrapsProof()`
-     * @param genesisAddressBookHash genesis AddressBook hash
+     * @param ledgerId ledgerID as computed by `computeNetworkID()`
      * @param tssVerificationKey hinTS VerificationKey, or 1480 zeros for the initial proof
      * @return true if the decider successfully verifies the proof, false if not or if errors occur
      */
-    public boolean verifyCompressedProof(
-            byte[] compressedProof, byte[] genesisAddressBookHash, byte[] tssVerificationKey) {
+    public boolean verifyCompressedProof(byte[] compressedProof, byte[] ledgerId, byte[] tssVerificationKey) {
         // Ensure the PublicParams are loaded first.
         if (!isProofSupported()) {
             return false;
         }
-        if (genesisAddressBookHash == null
-                || genesisAddressBookHash.length != ADDRESS_BOOK_HASH_LENGTH_BYTES
+        if (ledgerId == null
+                || ledgerId.length != LEDGER_ID_LENGTH_BYTES
                 || tssVerificationKey == null
                 || tssVerificationKey.length != TSS_VERIFICATION_KEY_LENGTH_BYTES
                 || compressedProof == null
                 || compressedProof.length != COMPRESSED_WRAPS_PROOF_LENGTH_BYTES) {
             return false;
         }
-        return verifyCompressedProofImpl(compressedProof, genesisAddressBookHash, tssVerificationKey);
+        return verifyCompressedProofImpl(compressedProof, ledgerId, tssVerificationKey);
     }
 
     private native boolean verifyCompressedProofImpl(
-            byte[] compressedProof, byte[] genesisAddressBookHash, byte[] tssVerificationKey);
+            byte[] compressedProof, byte[] ledgerId, byte[] tssVerificationKey);
 
     /** Check if the sum of weights doesn't exceed MAX_SUM_OF_WEIGHTS. */
     private static boolean validateWeightsSum(final long weights[]) {

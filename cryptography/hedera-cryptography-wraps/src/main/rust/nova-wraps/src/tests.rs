@@ -624,11 +624,36 @@ fn address_book_hash_commits_to_every_field_of_every_entry() {
 }
 
 #[test]
+fn hints_vk_hash_matches_sha256_mod_field_vectors() {
+  // Independently computed as int.from_bytes(
+  //   hashlib.sha256(b"WRAPS-hints-vk-v1" + key).digest(), "big") % p.
+  // Here p is the BN254 scalar-field prime (E2::Base); the "test" digest exceeds p.
+  for (key, expected) in [
+    (
+      b"".as_slice(),
+      "21413247091772536467874513018411307512282131365167968914003517499582616033055",
+    ),
+    (
+      b"abc".as_slice(),
+      "21541486732608585146587072126564701230732362931294278382164528532909071722216",
+    ),
+    (
+      b"test".as_slice(),
+      "5199035463200299668585261260608134732526294448273481405396083159139731913935",
+    ),
+  ] {
+    assert_eq!(
+      WRAPS::compute_hints_vk_hash(key),
+      HintsVKHash::<E2>::from_str_vartime(expected).unwrap()
+    );
+  }
+}
+
+#[test]
 fn hints_vk_hash_binds_length_and_every_byte() {
-  // Zero-padding the last word must not erase the key's original length, including
-  // immediately before and after an 8-byte boundary.
+  // Include SHA-256 padding and block boundaries after the 17-byte domain prefix.
   let mut zero_hashes = Vec::new();
-  for len in [0, 1, 7, 8, 9, 15, 16, 17, 31, 32] {
+  for len in [0, 1, 38, 39, 46, 47, 48, 63, 64, 65] {
     let hash = WRAPS::compute_hints_vk_hash(vec![0u8; len]);
     assert!(
       !zero_hashes.contains(&hash),
@@ -637,9 +662,8 @@ fn hints_vk_hash_binds_length_and_every_byte() {
     zero_hashes.push(hash);
   }
 
-  // Exercise two full words and a partial word. Every byte, including each word's
-  // high byte, must affect the hash; a zero suffix must remain significant too.
-  let key = [0xffu8; 17];
+  // Every byte across multiple blocks and a zero suffix must affect the hash.
+  let key = [0xffu8; 65];
   let hash = WRAPS::compute_hints_vk_hash(key);
   for i in 0..key.len() {
     let mut changed = key;
@@ -2033,7 +2057,7 @@ fn artifact_sizes() {
   // One genesis rotation, to get a proof of each kind.
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
-  let hints_vk = [0u8; 1480];
+  let hints_vk = [0u8; 1248];
   let message = WRAPS::compute_rotation_message(&genesis_ab, hints_vk).unwrap();
   let multisignature = threshold_sign(
     &message,
@@ -2101,6 +2125,7 @@ fn wraps_simulation() {
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
+  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1248]).unwrap();
 
   let mut prev = (genesis_ab, genesis_keys);
   let mut running_proof: Option<Vec<u8>> = None;
@@ -2113,7 +2138,7 @@ fn wraps_simulation() {
     } else {
       random_address_book()
     };
-    let hints_vk = [i as u8; 1480];
+    let hints_vk = [i as u8; 1248];
     let message = WRAPS::compute_rotation_message(&next.0, hints_vk).unwrap();
 
     let multisignature = threshold_sign(
@@ -2149,14 +2174,14 @@ fn wraps_simulation() {
     assert!(WRAPS::verify_compressed_wraps_proof(
       wraps_vk,
       &compressed,
-      &ab_genesis_hash,
+      &ledger_id,
       hints_vk
     )
     .unwrap());
     assert!(WRAPS::verify_uncompressed_wraps_proof(
       wraps_pp,
       &uncompressed,
-      &ab_genesis_hash,
+      &ledger_id,
       hints_vk
     )
     .unwrap());
@@ -2164,18 +2189,54 @@ fn wraps_simulation() {
     if i == 0 {
       // Both verification paths must bind the caller's expected endpoints.
       let wrong_genesis = ab_genesis_hash + Base::ONE;
-      let wrong_hints = [0xffu8; 1480];
-      for (genesis, hints) in [
-        (&wrong_genesis, &hints_vk),
-        (&ab_genesis_hash, &wrong_hints),
+      let mut wrong_ledger: RotationMessage<E2> = decode(&ledger_id).unwrap();
+      wrong_ledger[0] = wrong_genesis;
+      let wrong_ledger_id = encode(&wrong_ledger).unwrap();
+      let wrong_hints = [0xffu8; 1248];
+      for (ledger, hints) in [
+        (&wrong_ledger_id, &hints_vk),
+        (&ledger_id, &wrong_hints),
       ] {
         assert!(
-          !WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, genesis, hints,).unwrap()
+          !WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, ledger, hints).unwrap()
         );
         assert!(
-          !WRAPS::verify_uncompressed_wraps_proof(wraps_pp, &uncompressed, genesis, hints,)
+          !WRAPS::verify_uncompressed_wraps_proof(wraps_pp, &uncompressed, ledger, hints)
             .unwrap()
         );
+      }
+
+      // Verification uses only the ledger's address-book hash; current hints are separate.
+      let mut other_genesis_hints: RotationMessage<E2> = decode(&ledger_id).unwrap();
+      other_genesis_hints[1] += Base::ONE;
+      let other_ledger_id = encode(&other_genesis_hints).unwrap();
+      assert!(WRAPS::verify_compressed_wraps_proof(
+        wraps_vk, &compressed, &other_ledger_id, hints_vk,
+      )
+      .unwrap());
+      assert!(WRAPS::verify_uncompressed_wraps_proof(
+        wraps_pp, &uncompressed, &other_ledger_id, hints_vk,
+      )
+      .unwrap());
+
+      // Ledger IDs must be exactly one encoded two-field rotation message.
+      let mut trailing_ledger_id = ledger_id.clone();
+      trailing_ledger_id.push(0);
+      for malformed in [
+        Vec::new(),
+        ledger_id[..ledger_id.len() - 1].to_vec(),
+        encode(&ab_genesis_hash).unwrap(),
+        vec![0xff; ledger_id.len()],
+        trailing_ledger_id,
+      ] {
+        assert!(matches!(
+          WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, &malformed, hints_vk),
+          Err(WrapsError::InvalidInput(_))
+        ));
+        assert!(matches!(
+          WRAPS::verify_uncompressed_wraps_proof(wraps_pp, &uncompressed, &malformed, hints_vk),
+          Err(WrapsError::InvalidInput(_))
+        ));
       }
 
       // The genesis rotation keeps the same book, so its signature also
@@ -2208,7 +2269,7 @@ fn wraps_simulation() {
         assert!(!WRAPS::verify_compressed_wraps_proof(
           wraps_vk,
           &encode(&tampered).unwrap(),
-          &ab_genesis_hash,
+          &ledger_id,
           hints_vk,
         )
         .unwrap());
@@ -2220,7 +2281,7 @@ fn wraps_simulation() {
         WRAPS::verify_compressed_wraps_proof(
           wraps_vk,
           &trailing,
-          &ab_genesis_hash,
+          &ledger_id,
           hints_vk,
         ),
         Err(WrapsError::InvalidInput(reason)) if reason.contains("trailing bytes")
@@ -2257,7 +2318,7 @@ fn wraps_simulation() {
         assert!(!WRAPS::verify_uncompressed_wraps_proof(
           wraps_pp,
           &bytes,
-          &ab_genesis_hash,
+          &ledger_id,
           hints_vk,
         )
         .unwrap());
@@ -2314,6 +2375,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
 
   let (genesis_ab, genesis_keys) = random_address_book();
   let ab_genesis_hash = WRAPS::compute_addressbook_hash(&genesis_ab).unwrap();
+  let ledger_id = WRAPS::compute_rotation_message(&genesis_ab, [0u8; 1248]).unwrap();
 
   let mut prev = (genesis_ab, genesis_keys);
   let mut running_proof: Option<Vec<u8>> = None;
@@ -2325,7 +2387,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
     } else {
       random_address_book()
     };
-    let hints_vk = [i as u8; 1480];
+    let hints_vk = [i as u8; 1248];
     let message = WRAPS::compute_rotation_message(&next.0, hints_vk).unwrap();
 
     let has_sufficient_weight = i < SUFFICIENT_STEPS;
@@ -2372,7 +2434,7 @@ fn wraps_simulation_fails_below_weight_threshold() {
 
     let (uncompressed, compressed) = result.expect("WRAPS proof should be created");
     assert!(
-      WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, &ab_genesis_hash, hints_vk)
+      WRAPS::verify_compressed_wraps_proof(wraps_vk, &compressed, &ledger_id, hints_vk)
         .unwrap(),
       "step {i}: compressed proof failed to verify",
     );

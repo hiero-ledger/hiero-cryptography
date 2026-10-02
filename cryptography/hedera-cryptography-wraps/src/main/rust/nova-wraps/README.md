@@ -77,7 +77,7 @@ directly through Nova. Once prepared, that key owns everything needed for compre
 verification and does not retain a reference to the public parameters:
 
 ```rust
-use novawraps::{CompressedVerifyingKey, PublicParams, WRAPS};
+use wraps::{CompressedVerifyingKey, PublicParams, WRAPS};
 
 let pp: PublicParams = WRAPS::load_public_params(&ptau_dir)?;
 let compact_vk: Vec<u8> = WRAPS::get_compressed_verification_key(&pp)?;
@@ -190,7 +190,7 @@ The typed payloads and `RoundMessage<E>` remain public and serializable for insp
 For example, given the result of a round-1 call:
 
 ```rust
-use novawraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
+use wraps::{decode, RoundMessage, SigningProtocolMessage, SigningProtocolObject, E2};
 
 let SigningProtocolObject::ProtocolMessage(bytes) = round1_result else {
     panic!("round 1 must return a broadcast message");

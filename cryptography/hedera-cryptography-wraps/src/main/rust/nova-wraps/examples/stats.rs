@@ -18,7 +18,7 @@
 //! cargo run --release -p novawraps --example stats
 //! ```
 
-use novawraps::{
+use wraps::{
   decode, encode, AddressBook, Base, BitVector, RotationMessage, RoundMessage,
   SchnorrMultiSignature, SchnorrSecretKey, SigningProtocolMessage, SigningProtocolObject,
   SigningProtocolPhase, E2, ENTROPY_SIZE, WRAPS,

@@ -864,12 +864,16 @@ impl WRAPS {
   ) -> Result<bool, WrapsError> {
     let running = decode::<UncompressedWrapsProof>(running_proof)?;
 
-    if running.z0.len() != 2 || running.zi.len() != 2 || running.z0[0] != *ab_genesis_hash {
+    if running.z0.len() != 2
+      || running.zi.len() != 2
+      || running.z0[0] != *ab_genesis_hash
+      || running.zi[1] != Self::compute_hints_vk_hash(hints_vk)
+    {
       return Ok(false);
     }
 
     match running.snark.verify(pp, running.num_steps, &running.z0) {
-      Ok(zi) => Ok(zi == running.zi && zi[1] == Self::compute_hints_vk_hash(hints_vk)),
+      Ok(zi) => Ok(zi == running.zi),
       Err(_) => Ok(false),
     }
   }

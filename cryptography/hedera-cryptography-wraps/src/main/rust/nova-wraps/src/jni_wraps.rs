@@ -381,11 +381,11 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
     env: JNIEnv,
     _instance: JObject,
     compressed_proof_jarray: JByteArray,
-    ab_genesis_hash_jarray: JByteArray,
+    ledger_id_jarray: JByteArray,
     tss_vk_jarray: JByteArray,
 ) -> jboolean {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let ab_genesis_hash: AddressBookHash<E2> = match deserialize_from_jbyte_array(&env, &ab_genesis_hash_jarray) {
+        let ledger_id_vec: Vec<u8> = match env.convert_byte_array(&ledger_id_jarray) {
             Ok(val) => val,
             Err(_) => return jboolean::from(false)
         };
@@ -418,20 +418,7 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             None => return jboolean::from(false)
         };
 
-        // Java supplies only the genesis book hash; retain the proof's genesis hints hash.
-        let proof: CompressedWrapsProof = match decode(&compressed_proof) {
-            Ok(val) => val,
-            Err(_) => return jboolean::from(false)
-        };
-        if proof.z0.len() != 2 {
-            return jboolean::from(false);
-        }
-        let ledger_id = match encode(&[ab_genesis_hash, proof.z0[1]]) {
-            Ok(val) => val,
-            Err(_) => return jboolean::from(false)
-        };
-
-        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ledger_id, tss_vk_vec) {
+        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ledger_id_vec, tss_vk_vec) {
             Ok(val) => jboolean::from(val),
             Err(_) => return jboolean::from(false)
         }

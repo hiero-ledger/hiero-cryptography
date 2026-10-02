@@ -85,8 +85,8 @@ public final class TSS {
     /**
      * A convenience API to verify a `tssSignature` on a `message` with a given `ledgerId`.
      * <p>
-     * The `ledgerId` identifies a specific network that signed the `message` and is a hash of the genesis AddressBook
-     * as computed by the `WRAPSLibraryBridge.hashAddressBook()`.
+     * The `ledgerId` identifies a specific network and is computed by the `WRAPSLibraryBridge.computeNetworkID()`
+     * using TSS genesis AddressBook and hinTS key hash.
      * <p>
      * The `tssSignature` is a composite array which is a simple concatenation of a `hints_verification_key`,
      * `hints_signature`, and an AddressBook proof data. See `TSS.composeSignature()` above for details.
@@ -109,7 +109,7 @@ public final class TSS {
      * than 1/2 of the network weight. See the three arguments version of the `HintsLibraryBridge.verifyAggregate()`
      * for details.
      *
-     * @param ledgerId genesis_ab_hash
+     * @param ledgerId ledgerID as computed by `WRAPSLibraryBridge.computeNetworkID()` for genesis AB and hinTS key
      * @param tssSignature hints_verification_key || hints_signature || [wraps_proof | aggregate_schnorr_signature]
      * @param message a message
      * @return true if both the message and the ledgerId verify successfully with the respective signatures and proofs.
@@ -121,8 +121,8 @@ public final class TSS {
     public static boolean verifyTSS(final byte[] ledgerId, final byte[] tssSignature, final byte[] message)
             throws IllegalStateException, IllegalArgumentException {
         // First, check constraints
-        if (ledgerId == null || ledgerId.length != 32) {
-            throw new IllegalArgumentException("`ledgerId` must be a 32 bytes array, instead got "
+        if (ledgerId == null || ledgerId.length != 64) {
+            throw new IllegalArgumentException("`ledgerId` must be a 64 bytes array, instead got "
                     + (ledgerId == null ? null : (ledgerId.length + "")));
         }
         if (tssSignature == null || tssSignature.length <= HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH) {
@@ -155,17 +155,8 @@ public final class TSS {
                 throw new IllegalStateException("Schnorr public keys haven't been provided");
             }
 
-            // We sign a rotation message with Schnorr signatures, so we have to prepare it first:
-            final byte[] hintsKeyHash = WRAPS.hashArray(hintsVerificationKey);
-            if (hintsKeyHash == null) {
-                // This is a very unlikely scenario that could only happen if the Rust code computing the Poseidon
-                // hash fails in an unknown way. We interpret this condition as a malformed input argument:
-                throw new IllegalArgumentException("Failed to hash `hints_verification_key` from `tssSignature`");
-            }
-            final byte[] rotationMessage = Arrays.copyOf(ledgerId, ledgerId.length + hintsKeyHash.length);
-            System.arraycopy(hintsKeyHash, 0, rotationMessage, ledgerId.length, hintsKeyHash.length);
-
-            if (!WRAPS.verifySignature(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds, rotationMessage, abProof)) {
+            // We sign the ledgerId, so we verify using it as a message:
+            if (!WRAPS.verifySignature(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds, ledgerId, abProof)) {
                 return false;
             }
         } else {

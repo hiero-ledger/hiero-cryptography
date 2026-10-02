@@ -191,7 +191,7 @@ public class WRAPSLibraryBridgeTest {
 
         byte[] hintsVK = new byte[1096];
         final byte[] message =
-                WRAPS.formatRotationMessage(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
+                WRAPS.computeNetworkID(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
 
         final SigningProtocolOutput output = aggregateSignature(network, message);
         for (int roundIndex = 0; roundIndex < 3; roundIndex++) {
@@ -809,19 +809,18 @@ public class WRAPSLibraryBridgeTest {
         final long[] nodeIds = new long[] {0, 1, 3};
         final byte[] hintsKey = new byte[1480];
 
-        assertNull(WRAPS.formatRotationMessage(null, weights, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(new byte[0][], weights, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(new byte[][] {null, keys[1], keys[2]}, weights, nodeIds, hintsKey));
-        assertNull(
-                WRAPS.formatRotationMessage(new byte[][] {new byte[0], keys[1], keys[2]}, weights, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, null, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, new long[0], nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, new long[] {-1, 2, 3}, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, new long[] {1, Long.MAX_VALUE, 3}, nodeIds, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, weights, null, hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, weights, new long[1], hintsKey));
-        assertNull(WRAPS.formatRotationMessage(keys, weights, nodeIds, null));
-        assertNull(WRAPS.formatRotationMessage(keys, weights, nodeIds, new byte[0]));
+        assertNull(WRAPS.computeNetworkID(null, weights, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(new byte[0][], weights, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(new byte[][] {null, keys[1], keys[2]}, weights, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(new byte[][] {new byte[0], keys[1], keys[2]}, weights, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, null, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, new long[0], nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, new long[] {-1, 2, 3}, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, new long[] {1, Long.MAX_VALUE, 3}, nodeIds, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, weights, null, hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, weights, new long[1], hintsKey));
+        assertNull(WRAPS.computeNetworkID(keys, weights, nodeIds, null));
+        assertNull(WRAPS.computeNetworkID(keys, weights, nodeIds, new byte[0]));
     }
 
     @Test
@@ -841,9 +840,9 @@ public class WRAPSLibraryBridgeTest {
 
         final byte[] dummyHintsKey = new byte[1096];
 
-        final byte[] message0 = WRAPS.formatRotationMessage(
+        final byte[] ledgerID = WRAPS.computeNetworkID(
                 genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds(), dummyHintsKey);
-        final SigningProtocolOutput output0 = aggregateSignature(genesisNetwork, message0);
+        final SigningProtocolOutput output0 = aggregateSignature(genesisNetwork, ledgerID);
 
         System.err.println("Computing proof0 which may take up to ~1 minute...");
         final Proof proof0 = WRAPS.constructWrapsProof(
@@ -862,7 +861,7 @@ public class WRAPSLibraryBridgeTest {
         assertEquals(COMPRESSED_PROOF_SIZE_BYTES, proof0.compressed().length);
 
         // Note: the compressed proof is non-deterministic, so we can only check the size, and then verify it:
-        assertTrue(WRAPS.verifyCompressedProof(proof0.compressed(), genesisAddressBookHash, dummyHintsKey));
+        assertTrue(WRAPS.verifyCompressedProof(proof0.compressed(), ledgerID, dummyHintsKey));
 
         // Now let's test a rotated AddressBook.
         final Network nextNetwork = new Network(List.of(
@@ -879,7 +878,7 @@ public class WRAPSLibraryBridgeTest {
                 genesisNetwork.weights(),
                 SIGNERS_NUM);
 
-        final byte[] message1 = WRAPS.formatRotationMessage(
+        final byte[] message1 = WRAPS.computeNetworkID(
                 nextNetwork.publicKeys(), nextNetwork.weights(), nextNetwork.nodeIds(), hintsKeys.verificationKey());
         final SigningProtocolOutput output1 = aggregateSignature(genesisNetwork, message1);
 
@@ -899,8 +898,7 @@ public class WRAPSLibraryBridgeTest {
 
         assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof1.uncompressed().length);
         assertEquals(COMPRESSED_PROOF_SIZE_BYTES, proof1.compressed().length);
-        assertTrue(
-                WRAPS.verifyCompressedProof(proof1.compressed(), genesisAddressBookHash, hintsKeys.verificationKey()));
+        assertTrue(WRAPS.verifyCompressedProof(proof1.compressed(), ledgerID, hintsKeys.verificationKey()));
     }
 
     @Test
@@ -915,7 +913,7 @@ public class WRAPSLibraryBridgeTest {
 
         final byte[] dummyHintsKey = new byte[1288];
 
-        final byte[] message0 = WRAPS.formatRotationMessage(
+        final byte[] message0 = WRAPS.computeNetworkID(
                 genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds(), dummyHintsKey);
         final SigningProtocolOutput output0 = aggregateSignature(genesisNetwork, message0);
 

@@ -812,11 +812,16 @@ impl WRAPS {
 
     running.num_steps = running.snark.num_steps();
     running.zi = running.snark.outputs().to_vec();
+    // Reuse the proof's genesis hints hash when assembling its ledger ID.
+    // Note that this is not really the ledger_id because we use the current
+    // iteration's hints_vk rather than the genesis one. But, let us pretend
+    // because we need a ledger_id-like value for verification purposes.
+    let not_really_ledger_id = encode(&[*ab_genesis_hash, running.z0[1]])?;
     let uncompressed = encode(&running)?;
     if !Self::verify_uncompressed_wraps_proof(
       pp,
       &uncompressed,
-      ab_genesis_hash,
+      &not_really_ledger_id,
       hints_vk.as_ref(),
     )? {
       return Err(WrapsError::cryptography(
@@ -837,7 +842,12 @@ impl WRAPS {
     })?;
 
     // Check what we are about to hand out, against the key a verifier would use.
-    if !Self::verify_compressed_wraps_proof(&vk, &compressed, ab_genesis_hash, hints_vk.as_ref())? {
+    if !Self::verify_compressed_wraps_proof(
+      &vk,
+      &compressed,
+      &not_really_ledger_id,
+      hints_vk.as_ref(),
+    )? {
       return Err(WrapsError::cryptography(
         "the compressed proof just produced does not verify",
       ));
@@ -853,17 +863,22 @@ impl WRAPS {
   /// already holds the folding parameters and just wants to confirm a chain it was
   /// handed; a remote verifier should be given the compressed proof instead.
   /// Borrows the same public parameters used for proof construction.
+  ///
+  /// `ledger_id` is the output of [`Self::compute_rotation_message`] on the genesis
+  /// address book and genesis hints key. Only its address-book hash is checked;
+  /// `hints_vk` supplies the expected current hints key separately.
   pub fn verify_uncompressed_wraps_proof(
     pp: &PublicParams,
     running_proof: &Vec<u8>,
-    ab_genesis_hash: &AddressBookHash<E2>,
+    ledger_id: impl AsRef<[u8]>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
+    let [ab_genesis_hash, _] = decode_rotation_message(ledger_id.as_ref())?;
     let running = decode::<UncompressedWrapsProof>(running_proof)?;
 
     if running.z0.len() != 2
       || running.zi.len() != 2
-      || running.z0[0] != *ab_genesis_hash
+      || running.z0[0] != ab_genesis_hash
       || running.zi[1] != Self::compute_hints_vk_hash(hints_vk)
     {
       return Ok(false);
@@ -877,25 +892,27 @@ impl WRAPS {
 
   /// Checks a compressed proof against a prepared verifier key.
   ///
-  /// Only the proof is decoded. Constants, generators, and the verifier-key
+  /// Only the proof and ledger ID are decoded. Constants, generators, and the verifier-key
   /// digests computed during setup are reused across calls.
   ///
   /// Beyond the SNARK itself this pins the two ends of the chain: it must start at
-  /// `ab_genesis_hash` and must currently carry `hints_vk`. Without those a valid proof
-  /// of some *other* chain would pass.
+  /// the address-book hash in `ledger_id` and must currently carry `hints_vk`.
+  /// `ledger_id` is the output of [`Self::compute_rotation_message`] on the genesis
+  /// address book and genesis hints key. Its hints-key component is not checked.
   pub fn verify_compressed_wraps_proof(
     vk: &CompressedVerifyingKey,
     proof_serialized: &Vec<u8>,
-    ab_genesis_hash: &AddressBookHash<E2>,
+    ledger_id: impl AsRef<[u8]>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
+    let [ab_genesis_hash, _] = decode_rotation_message(ledger_id.as_ref())?;
     let proof = decode::<CompressedWrapsProof>(proof_serialized)?;
 
     if proof.z0.len() != 2 || proof.zi.len() != 2 {
       return Ok(false);
     }
     // The chain starts at the genesis book, and currently carries the expected hints key.
-    let genesis_ok = proof.z0[0] == *ab_genesis_hash;
+    let genesis_ok = proof.z0[0] == ab_genesis_hash;
     let hints_ok = proof.zi[1] == Self::compute_hints_vk_hash(hints_vk);
 
     // Nova returns the final state authenticated by the SNARK. It must agree with

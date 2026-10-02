@@ -8,6 +8,8 @@ use std::sync::OnceLock;
 
 use crate::{jni_util, WRAPS, SigningProtocolPhase, ENTROPY_SIZE, SigningProtocolMessage, SigningProtocolObject, SchnorrMultiSignature, AddressBook, AddressBookHash, SchnorrSecretKey, E2, HintsVKHash, PublicParams, CompressedVerifyingKey};
 use crate::jni_util::deserialize_from_jbyte_array;
+use crate::wraps::CompressedWrapsProof;
+use crate::{decode, encode};
 
 //const SECRET_KEY_LENGTH: usize = 32;
 
@@ -416,7 +418,20 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             None => return jboolean::from(false)
         };
 
-        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ab_genesis_hash, tss_vk_vec) {
+        // Java supplies only the genesis book hash; retain the proof's genesis hints hash.
+        let proof: CompressedWrapsProof = match decode(&compressed_proof) {
+            Ok(val) => val,
+            Err(_) => return jboolean::from(false)
+        };
+        if proof.z0.len() != 2 {
+            return jboolean::from(false);
+        }
+        let ledger_id = match encode(&[ab_genesis_hash, proof.z0[1]]) {
+            Ok(val) => val,
+            Err(_) => return jboolean::from(false)
+        };
+
+        match WRAPS::verify_compressed_wraps_proof(compressed_verifying_key, &compressed_proof, &ledger_id, tss_vk_vec) {
             Ok(val) => jboolean::from(val),
             Err(_) => return jboolean::from(false)
         }

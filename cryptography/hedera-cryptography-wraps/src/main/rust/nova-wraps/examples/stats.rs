@@ -78,6 +78,10 @@ fn main() {
       })
       .expect("valid genesis book"),
   );
+  let ledger_id = round_trip(
+    "compute_rotation_message return: genesis ledger ID bytes",
+    &WRAPS::compute_rotation_message(&previous.0, vec![0u8; 1480]).expect("valid genesis book"),
+  );
   let mut running_proof: Option<Vec<u8>> = None;
 
   for rotation in 0..ROTATIONS {
@@ -88,6 +92,7 @@ fn main() {
     report.size("PublicParams", &pp);
     report.artifact("Compact verification key (versioned)", vk_bytes.len());
     report.size("AddressBookHash<E2>", &genesis_hash);
+    report.artifact("Ledger ID (genesis rotation message)", ledger_id.len());
     report_address_book_types(&mut report, &previous.0, &previous.1);
 
     // The first step attests genesis itself; later committees are freshly generated.
@@ -132,6 +137,9 @@ fn main() {
       encode(&decoded_message).expect("encode rotation message"),
       message
     );
+    if rotation == 0 {
+      assert_eq!(message, ledger_id);
+    }
     report.size("HintsVKHash<E2>", &hints_vk_hash);
     report.size("RotationMessage<E2>", &decoded_message);
     let multisignature = sign(
@@ -188,28 +196,28 @@ fn main() {
     let running = round_trip("running proof: Vec<u8>", &running);
     let compressed = round_trip("compressed proof: Vec<u8>", &compressed);
 
-    let (compressed, proof_genesis, proof_hints) = round_trip(
-      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); prepared key reused",
-      &(compressed, proof_genesis, proof_hints),
+    let (compressed, proof_ledger_id, proof_hints) = round_trip(
+      "verify_compressed_wraps_proof inputs: (proof bytes, ledger ID bytes, hints vk); prepared key reused",
+      &(compressed, ledger_id.clone(), proof_hints),
     );
     assert!(round_trip(
       "verify_compressed_wraps_proof return: bool",
       &timings
         .measure("WRAPS::verify_compressed_wraps_proof", || {
-          WRAPS::verify_compressed_wraps_proof(&vk, &compressed, &proof_genesis, &proof_hints)
+          WRAPS::verify_compressed_wraps_proof(&vk, &compressed, &proof_ledger_id, &proof_hints)
         })
         .expect("valid compressed proof inputs"),
     ));
 
-    let (running, proof_genesis, proof_hints) = round_trip(
-      "verify_uncompressed_wraps_proof inputs: (running proof, genesis hash, hints vk); public parameters reused",
-      &(running, proof_genesis, proof_hints),
+    let (running, proof_ledger_id, proof_hints) = round_trip(
+      "verify_uncompressed_wraps_proof inputs: (running proof, ledger ID bytes, hints vk); public parameters reused",
+      &(running, proof_ledger_id, proof_hints),
     );
     assert!(round_trip(
       "verify_uncompressed_wraps_proof return: bool",
       &timings
         .measure("WRAPS::verify_uncompressed_wraps_proof", || {
-          WRAPS::verify_uncompressed_wraps_proof(&pp, &running, &proof_genesis, &proof_hints)
+          WRAPS::verify_uncompressed_wraps_proof(&pp, &running, &proof_ledger_id, &proof_hints)
         })
         .expect("valid running proof inputs"),
     ));

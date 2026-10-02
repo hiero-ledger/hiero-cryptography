@@ -4,8 +4,8 @@
 //!
 //! Serializable values cross a bincode boundary before use, with byte sizes printed
 //! for successful return values and function arguments. Between rotations, only a
-//! serialized checkpoint is retained: public parameters, genesis hash, committee,
-//! signing keys, running proof, and rotation count. Each iteration restores those
+//! serialized checkpoint is retained: public parameters, genesis hash, ledger ID,
+//! committee, signing keys, running proof, and rotation count. Each iteration restores those
 //! values and derives a fresh compressed verifier from the decoded parameters.
 //! Compact export is measured separately from verifier setup. Key generation
 //! and signing show one representative member per book/phase. Only sizes, never key
@@ -30,6 +30,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 struct DemoState {
   pp: PublicParams,
   ab_genesis_hash: Base,
+  ledger_id: Vec<u8>,
   prev: (AddressBook<E2>, Vec<SchnorrSecretKey<E2>>),
   running_proof: Option<Vec<u8>>,
   completed_rotations: usize,
@@ -76,6 +77,10 @@ fn main() {
     "compute_addressbook_hash return: AddressBookHash",
     WRAPS::compute_addressbook_hash(&genesis_ab).unwrap(),
   );
+  let ledger_id = round_trip(
+    "compute_rotation_message return: genesis ledger ID bytes",
+    WRAPS::compute_rotation_message(&genesis_ab, vec![0u8; 1480]).unwrap(),
+  );
 
   // A seat can be held open with the sentinel key: the point at infinity, which
   // contributes nothing to a joint key. It is exempt from the proof-of-knowledge check
@@ -110,6 +115,7 @@ fn main() {
   let mut checkpoint = save_checkpoint(DemoState {
     pp,
     ab_genesis_hash,
+    ledger_id,
     prev: (genesis_ab, genesis_keys),
     running_proof: None,
     completed_rotations: 0,
@@ -121,6 +127,7 @@ fn main() {
     let DemoState {
       pp,
       ab_genesis_hash,
+      ledger_id,
       prev,
       running_proof,
       completed_rotations: i,
@@ -169,6 +176,9 @@ fn main() {
       encode(&decoded_message).expect("encode rotation message"),
       message
     );
+    if i == 0 {
+      assert_eq!(message, ledger_id);
+    }
     let bitvector = round_trip(
       "signing_protocol input: BitVector",
       sufficient_bitvector(prev.0.len()),
@@ -229,15 +239,19 @@ fn main() {
       (uncompressed, compressed),
     );
 
-    let (proof, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_compressed_wraps_proof inputs: (proof bytes, genesis hash, hints vk); key derived from restored parameters",
-      (compressed, ab_genesis_hash, hints_vk.clone()),
+    let (proof, verifier_ledger_id, verifier_hints_vk) = round_trip(
+      "verify_compressed_wraps_proof inputs: (proof bytes, ledger ID bytes, hints vk); key derived from restored parameters",
+      (compressed, ledger_id.clone(), hints_vk.clone()),
     );
 
     let start = Instant::now();
-    let verified =
-      WRAPS::verify_compressed_wraps_proof(&wraps_vk, &proof, &genesis_hash, &verifier_hints_vk)
-        .unwrap();
+    let verified = WRAPS::verify_compressed_wraps_proof(
+      &wraps_vk,
+      &proof,
+      &verifier_ledger_id,
+      &verifier_hints_vk,
+    )
+    .unwrap();
     println!(
       "  verify_compressed_wraps_proof: {verified:?}, took {:?}",
       start.elapsed()
@@ -248,14 +262,18 @@ fn main() {
     ));
 
     // Check the same chain from its running proof using the restored parameters.
-    let (uncompressed, genesis_hash, verifier_hints_vk) = round_trip(
-      "verify_uncompressed_wraps_proof inputs (excluding restored public parameters)",
-      (uncompressed, ab_genesis_hash, hints_vk.clone()),
+    let (uncompressed, verifier_ledger_id, verifier_hints_vk) = round_trip(
+      "verify_uncompressed_wraps_proof inputs: (running proof, ledger ID bytes, hints vk); public parameters restored",
+      (uncompressed, ledger_id.clone(), hints_vk.clone()),
     );
     let start = Instant::now();
-    let verified =
-      WRAPS::verify_uncompressed_wraps_proof(&pp, &uncompressed, &genesis_hash, &verifier_hints_vk)
-        .unwrap();
+    let verified = WRAPS::verify_uncompressed_wraps_proof(
+      &pp,
+      &uncompressed,
+      &verifier_ledger_id,
+      &verifier_hints_vk,
+    )
+    .unwrap();
     println!(
       "  verify_uncompressed_wraps_proof: {verified:?}, took {:?}",
       start.elapsed()
@@ -289,6 +307,7 @@ fn main() {
     checkpoint = save_checkpoint(DemoState {
       pp,
       ab_genesis_hash,
+      ledger_id,
       prev: next,
       running_proof: Some(uncompressed),
       completed_rotations: i + 1,

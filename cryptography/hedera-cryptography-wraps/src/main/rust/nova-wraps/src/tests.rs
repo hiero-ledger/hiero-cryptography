@@ -624,11 +624,36 @@ fn address_book_hash_commits_to_every_field_of_every_entry() {
 }
 
 #[test]
+fn hints_vk_hash_matches_sha256_mod_field_vectors() {
+  // Independently computed as int.from_bytes(
+  //   hashlib.sha256(b"WRAPS-hints-vk-v1" + key).digest(), "big") % p.
+  // Here p is the BN254 scalar-field prime (E2::Base); the "test" digest exceeds p.
+  for (key, expected) in [
+    (
+      b"".as_slice(),
+      "21413247091772536467874513018411307512282131365167968914003517499582616033055",
+    ),
+    (
+      b"abc".as_slice(),
+      "21541486732608585146587072126564701230732362931294278382164528532909071722216",
+    ),
+    (
+      b"test".as_slice(),
+      "5199035463200299668585261260608134732526294448273481405396083159139731913935",
+    ),
+  ] {
+    assert_eq!(
+      WRAPS::compute_hints_vk_hash(key),
+      HintsVKHash::<E2>::from_str_vartime(expected).unwrap()
+    );
+  }
+}
+
+#[test]
 fn hints_vk_hash_binds_length_and_every_byte() {
-  // Zero-padding the last word must not erase the key's original length, including
-  // immediately before and after an 8-byte boundary.
+  // Include SHA-256 padding and block boundaries after the 17-byte domain prefix.
   let mut zero_hashes = Vec::new();
-  for len in [0, 1, 7, 8, 9, 15, 16, 17, 31, 32] {
+  for len in [0, 1, 38, 39, 46, 47, 48, 63, 64, 65] {
     let hash = WRAPS::compute_hints_vk_hash(vec![0u8; len]);
     assert!(
       !zero_hashes.contains(&hash),
@@ -637,9 +662,8 @@ fn hints_vk_hash_binds_length_and_every_byte() {
     zero_hashes.push(hash);
   }
 
-  // Exercise two full words and a partial word. Every byte, including each word's
-  // high byte, must affect the hash; a zero suffix must remain significant too.
-  let key = [0xffu8; 17];
+  // Every byte across multiple blocks and a zero suffix must affect the hash.
+  let key = [0xffu8; 65];
   let hash = WRAPS::compute_hints_vk_hash(key);
   for i in 0..key.len() {
     let mut changed = key;

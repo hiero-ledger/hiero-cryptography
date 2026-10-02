@@ -316,15 +316,13 @@ all supported targets.
 
 ## Hashes
 
-Address-book commitments, rotation signature challenges, and hints verification-key
-hashes use Poseidon. `AddressBookHash<E>` and `HintsVKHash<E>` name the two hashes in
-each rotation message and IVC state. `WRAPS::compute_hints_vk_hash` computes a
-`HintsVKHash<E2>` from serialized hints verification-key bytes.
-The hints key is packed into little-endian 8-byte words, with the last word zero-padded
-and the original byte length absorbed first. This replaces the earlier 31-byte packing:
-keys longer than 8 bytes have new hashes, so rotation signatures and proofs bound to
-their old hashes must be regenerated. The hints-key packing change itself does not
-change the circuit or Nova setup keys; the weight constraints described above do.
+Address-book commitments and rotation signature challenges use Poseidon.
+`AddressBookHash<E>` and `HintsVKHash<E>` name the two hashes in each rotation message
+and IVC state. `WRAPS::compute_hints_vk_hash` computes SHA-256 of
+`b"WRAPS-hints-vk-v1" || hints_vk_bytes`, interprets the entire digest as a big-endian integer, and
+reduces it modulo the `E2::Base` field prime to obtain a `HintsVKHash<E2>`.
+Rotation signatures and proofs bound to the old Poseidon or unprefixed SHA-256 hints
+hashes must be regenerated. This hash change does not change the circuit or Nova setup keys.
 
 Native key proofs of knowledge use SHA-256 under the domain
 `WRAPS-schnorr-pok-sha256-mod-v4`, followed by the generator, public key, and commitment.

@@ -2,7 +2,7 @@
 
 use crate::{
   circuit::RotationCircuit,
-  constants::{DS_ADDRESS_BOOK, DS_HINTS_VK, ENTROPY_SIZE, HINTS_VK_CHUNK_SIZE, MAX_AB_SIZE},
+  constants::{DST_HINTS_VK, DS_ADDRESS_BOOK, ENTROPY_SIZE, MAX_AB_SIZE},
   error::WrapsError,
   poseidon::{poseidon_native, shared_constants, Constants},
   schnorr::{
@@ -19,6 +19,7 @@ use nova_snark::{
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 pub type E1 = Bn256EngineKZG;
@@ -50,7 +51,7 @@ pub type AddressBook<E> = Vec<AddressBookEntry<E>>;
 /// The Poseidon commitment to an address book, the first element of the IVC state.
 pub type AddressBookHash<E> = <E as Engine>::Base;
 
-/// The Poseidon hash of a hints verification key, the second element of the IVC state.
+/// The SHA-256 hash of a hints verification key reduced into the field, the second IVC state element.
 pub type HintsVKHash<E> = <E as Engine>::Base;
 
 /// An aggregate signature together with the bitvector naming who produced it.
@@ -219,19 +220,17 @@ where
 
 /// Hashes a serialized hints verification key down to one field element.
 ///
-/// Each 8-byte chunk is interpreted as a little-endian `u64`, with the final chunk
-/// zero-padded. The length is absorbed first so that trailing zeros cannot be traded
-/// against a shorter key. Native only — the circuit takes this hash as advice and
-/// never recomputes it.
-fn hash_hints_vk<E: Engine>(pc: &Constants<E::Base>, vk_bytes: &[u8]) -> HintsVKHash<E> {
-  let mut elements = vec![E::Base::from(vk_bytes.len() as u64)];
-  for chunk in vk_bytes.chunks(HINTS_VK_CHUNK_SIZE) {
-    let mut buf = [0u8; HINTS_VK_CHUNK_SIZE];
-    buf[..chunk.len()].copy_from_slice(chunk);
-    elements.push(E::Base::from(u64::from_le_bytes(buf)));
-  }
-
-  poseidon_native(pc, DS_HINTS_VK, &elements)
+/// Hashes `b"WRAPS-hints-vk-v1" || vk_bytes` with SHA-256, interprets the entire digest
+/// as a big-endian integer, and reduces it modulo the `E::Base` field prime.
+/// Native only — the circuit takes this hash as advice and never recomputes it.
+fn hash_hints_vk<E: Engine>(vk_bytes: &[u8]) -> HintsVKHash<E> {
+  let mut hasher = Sha256::new();
+  hasher.update(DST_HINTS_VK);
+  hasher.update(vk_bytes);
+  let radix = E::Base::from(256u64);
+  hasher.finalize().iter().fold(E::Base::ZERO, |acc, &byte| {
+    acc * radix + E::Base::from(u64::from(byte))
+  })
 }
 
 /// The nonidentity public keys the bitvector names, in address-book order.
@@ -648,9 +647,9 @@ impl WRAPS {
     Ok(hash_address_book::<E2>(&pc, &pad_address_book::<E2>(ab)?))
   }
 
-  /// The Poseidon hash of a serialized hints verification key.
+  /// The SHA-256 hash of `b"WRAPS-hints-vk-v1" || hints_vk`, reduced modulo the field prime.
   pub fn compute_hints_vk_hash(hints_vk: impl AsRef<[u8]>) -> HintsVKHash<E2> {
-    hash_hints_vk::<E2>(&shared_constants(), hints_vk.as_ref())
+    hash_hints_vk::<E2>(hints_vk.as_ref())
   }
 
   /// The encoded two-field message a committee signs to authorise a rotation.
@@ -688,8 +687,6 @@ impl WRAPS {
   ) -> Result<CompressedVerifyingKey, WrapsError> {
     let (_, inner) = CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
       .map_err(|e| WrapsError::cryptography(format!("compressed verifier setup failed: {e}")))?;
-    // Initialize WRAPS' hints-hash constants before the first verification.
-    let _ = shared_constants();
     Ok(CompressedVerifyingKey { inner })
   }
 

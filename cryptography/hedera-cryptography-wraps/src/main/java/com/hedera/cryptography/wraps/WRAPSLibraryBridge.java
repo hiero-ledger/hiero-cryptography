@@ -79,7 +79,7 @@ public class WRAPSLibraryBridge {
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // DEFINITIONS BELOW MUST MATCH THEIR NATIVE CODE COUNTER-PARTS (see src/rust/wraps/src/lib.rs):
+    // DEFINITIONS BELOW MUST MATCH THEIR NATIVE CODE COUNTER-PARTS (see src/main/rust/nova-wraps/src/constants.rs):
     // ------------------------------------------------------------------------------------------------------
 
     /** The maximum size of an AddressBook. */

@@ -2,7 +2,6 @@
 dependencies {
     published(project(":hedera-cryptography-hints"))
     published(project(":hedera-cryptography-wraps"))
-    published(project(":hedera-cryptography-ceremony"))
     published(project(":libsodium"))
     published(project(":libsecp256k1"))
     published(project(":libxkcp"))

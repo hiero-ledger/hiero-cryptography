@@ -465,10 +465,10 @@ impl WRAPS {
   /// Executes a single phase of the three-round signing protocol.
   ///
   /// `protocol_instance_entropy` is per signer, per instance: the caller passes the same
-  /// value through R1, R2 and R3 of one rotation — the rounds are stateless and each
-  /// re-derives the signer's nonce from it — and a fresh one for the next rotation.
-  /// Reusing a seed across rotations repeats the nonce; signatures under different
-  /// challenges can then reveal the signer's secret key.
+  /// entropy and message through R1, R2 and R3 of one rotation. The rounds are stateless
+  /// and each re-derives the signer's nonce from SHA256(entropy || canonical message
+  /// field encodings). Use fresh entropy for every signing instance: reusing both
+  /// inputs repeats the nonce, and different shared challenges can reveal the key.
   ///
   /// Every phase works over the *signing subset* named by `bitvector`, never the whole
   /// address book — including the challenge derived in R3, which has to match the joint
@@ -476,7 +476,7 @@ impl WRAPS {
   ///
   /// # `message_to_sign` must come from [`WRAPS::compute_rotation_message`]
   ///
-  /// R3 and Aggregate decode the two field elements from the supplied bytes and cannot
+  /// Every phase decodes the two field elements from the supplied bytes and cannot
   /// look behind them. [`WRAPS::compute_rotation_message`] validates the book being
   /// endorsed before hashing it. That check establishes — for the whole rotation *after* this one —
   /// that every non-identity key is unique and came with a proof of possession. The
@@ -488,7 +488,8 @@ impl WRAPS {
   /// from a proposer or another signer silently drops that check, and there is nothing
   /// downstream that can notice.
   ///
-  /// R1 needs entropy and empty round-message lists; the book and message may be empty.
+  /// Every phase requires a valid encoded rotation message. R1 needs entropy and empty
+  /// round-message lists; the book may be empty.
   /// R2 needs all R1 messages. R3 needs all R1/R2 messages and the caller's signing key.
   /// Aggregate needs all three rounds; entropy is optional and ignored. A signing key is required
   /// only in R3; it is optional and ignored in R1, R2, and Aggregate.
@@ -537,6 +538,7 @@ impl WRAPS {
         round3_messages.len(),
       ],
     )?;
+    let message = decode_rotation_message(message_to_sign.as_ref())?;
 
     // Unused round lists are empty after phase validation, so they decode to empty vectors.
     let round1 = decode_round_messages(round1_messages, "round-1", |message| match message {
@@ -555,28 +557,26 @@ impl WRAPS {
     match phase {
       SigningProtocolPhase::R1 => {
         let seed = protocol_instance_entropy.expect("validated R1 entropy");
-        encode_protocol_message(RoundMessage::Round1(Multisig::<E2>::round1(seed)))
+        encode_protocol_message(RoundMessage::Round1(Multisig::<E2>::round1(seed, &message)))
       }
       SigningProtocolPhase::R2 => {
         let seed = protocol_instance_entropy.expect("validated R2 entropy");
-        if !round1.contains(&Multisig::<E2>::round1(seed)) {
+        if !round1.contains(&Multisig::<E2>::round1(seed, &message)) {
           return Err(WrapsError::invalid_input(
             "R2 is missing the caller's round-1 commitment",
           ));
         }
-        encode_protocol_message(RoundMessage::Round2(Multisig::<E2>::round2(seed)))
+        encode_protocol_message(RoundMessage::Round2(Multisig::<E2>::round2(seed, &message)))
       }
       SigningProtocolPhase::R3 => {
         let seed = protocol_instance_entropy.expect("validated R3 entropy");
         let sk = signing_key.expect("validated R3 signing key");
-        let message = decode_rotation_message(message_to_sign.as_ref())?;
         let pc = shared_constants();
         let share =
           Multisig::<E2>::round3(&pc, seed, &message, sk, &participants, &round1, &round2)?;
         encode_protocol_message(RoundMessage::Round3(share))
       }
       SigningProtocolPhase::Aggregate => {
-        let message = decode_rotation_message(message_to_sign.as_ref())?;
         let pc = shared_constants();
         let signature =
           Multisig::<E2>::aggregate(&pc, &message, &participants, &round1, &round2, &round3)?;

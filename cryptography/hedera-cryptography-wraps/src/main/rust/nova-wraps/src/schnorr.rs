@@ -237,7 +237,7 @@ where
 //
 // The rounds are commit, reveal, respond:
 //
-//   1. every signer derives a nonce `k_i` from its session seed and broadcasts
+//   1. every signer derives a nonce `k_i` from its session entropy and message and broadcasts
 //      `SHA256(k_i·G)` — a commitment to its nonce point, not the point itself;
 //   2. every signer opens that commitment by broadcasting `r_i = k_i·G`;
 //   3. every signer checks all the openings, derives the shared challenge
@@ -323,23 +323,29 @@ impl<E: Engine> Multisig<E>
 where
   E::GE: DlogGroup,
 {
-  /// Derives a protocol instance's nonce deterministically from its entropy.
+  /// Derives a nonce from SHA256(entropy || canonical message field encodings).
   ///
-  /// The rounds are stateless: a signer holds nothing between them, and each round
-  /// re-derives `k` from the entropy it is handed. That is why the caller **must** pass
-  /// the same value to rounds 1, 2 and 3 of one instance — round 1 commits to `k·G`,
+  /// The digest seeds a ChaCha20 stream used to sample the scalar. The rounds are
+  /// stateless, so the caller **must** pass the same entropy and message to rounds
+  /// 1, 2 and 3 of one instance — round 1 commits to `k·G`,
   /// round 2 opens that commitment, and round 3 answers with `k + sk·e`, so all three
   /// have to land on the same `k` or the session simply fails to verify.
   ///
-  /// The flip side is the caller's obligation: a **fresh** value per instance. Two
-  /// instances sharing entropy repeat `k` under different challenges, and the pair of
-  /// responses gives up `sk = (s - s') / (e - e')`. Nothing here can detect that — the
-  /// function sees one seed at a time — so it is a contract, not a check.
-  pub(crate) fn nonce(protocol_instance_entropy: [u8; ENTROPY_SIZE]) -> SchnorrNonce<E> {
+  /// Message binding changes the nonce when the message changes. Callers must still
+  /// use fresh entropy per instance: repeating both inputs repeats `k`, while other
+  /// participants can change the shared challenge. Two such responses reveal the key.
+  pub(crate) fn nonce(
+    protocol_instance_entropy: [u8; ENTROPY_SIZE],
+    msg: &[E::Base],
+  ) -> SchnorrNonce<E> {
     use rand_core::SeedableRng;
-    SchnorrNonce::<E>::random(&mut rand_chacha::ChaCha20Rng::from_seed(
-      protocol_instance_entropy,
-    ))
+    let mut hasher = Sha256::new();
+    hasher.update(protocol_instance_entropy);
+    for element in msg {
+      hasher.update(element.to_repr().as_ref());
+    }
+    let seed: [u8; ENTROPY_SIZE] = hasher.finalize().into();
+    SchnorrNonce::<E>::random(&mut rand_chacha::ChaCha20Rng::from_seed(seed))
   }
 
   /// The round-1 commitment to a nonce point.
@@ -367,17 +373,23 @@ where
   }
 
   /// Round 1: publish a commitment to this instance's nonce.
-  pub(crate) fn round1(protocol_instance_entropy: [u8; ENTROPY_SIZE]) -> MultisigRound1 {
-    Self::commit_nonce(&(E::GE::gen() * Self::nonce(protocol_instance_entropy)))
+  pub(crate) fn round1(
+    protocol_instance_entropy: [u8; ENTROPY_SIZE],
+    msg: &[E::Base],
+  ) -> MultisigRound1 {
+    Self::commit_nonce(&(E::GE::gen() * Self::nonce(protocol_instance_entropy, msg)))
   }
 
   /// Round 2: open the commitment by publishing the nonce point.
   ///
   /// The public protocol checks that every round-1 message, including this signer's
   /// commitment, is present before calling this helper. Round 3 checks all openings.
-  pub(crate) fn round2(protocol_instance_entropy: [u8; ENTROPY_SIZE]) -> MultisigRound2<E> {
+  pub(crate) fn round2(
+    protocol_instance_entropy: [u8; ENTROPY_SIZE],
+    msg: &[E::Base],
+  ) -> MultisigRound2<E> {
     MultisigRound2 {
-      nonce_point: E::GE::gen() * Self::nonce(protocol_instance_entropy),
+      nonce_point: E::GE::gen() * Self::nonce(protocol_instance_entropy, msg),
     }
   }
 
@@ -440,7 +452,7 @@ where
     round2: &[MultisigRound2<E>],
   ) -> Result<MultisigRound3<E>, WrapsError> {
     let e = Self::challenge(pc, msg, public_keys, round1, round2)?;
-    let nonce = Self::nonce(protocol_instance_entropy);
+    let nonce = Self::nonce(protocol_instance_entropy, msg);
     let pk = E::GE::gen() * *sk;
     let nonce_point = E::GE::gen() * nonce;
     // Address-book validation and sentinel filtering make participant keys unique.
@@ -450,7 +462,7 @@ where
       .ok_or_else(|| WrapsError::invalid_input("R3 signing key is not in the signing subset"))?;
     if round2[signer].nonce_point != nonce_point {
       return Err(WrapsError::invalid_input(
-        "R3 session entropy does not match the signer's round-2 nonce",
+        "R3 session entropy or message does not match the signer's round-2 nonce",
       ));
     }
     let s = nonce + *sk * field_switch::<E::Base, E::Scalar>(e);

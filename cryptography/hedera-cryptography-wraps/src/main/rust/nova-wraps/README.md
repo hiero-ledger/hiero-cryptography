@@ -260,8 +260,11 @@ same selected signer's key and nonce. Aggregation checks every partial signature
 Malformed encodings, wrong round tags, trailing bytes, and incorrect message counts
 are rejected. Entropy is required in R1, R2, and R3; it is optional and ignored in
 Aggregate. A signing key is required in R3 and is optional and ignored in R1, R2, and
-Aggregate. Every phase validates the signing book and rejects bits selecting seats
-outside that book. R2 onward also requires at least one selected nonidentity key.
+Aggregate. Every phase requires a valid encoded two-field rotation message, including
+R1 and R2. A signer must supply the same entropy and message throughout R1, R2, and
+R3, because both inputs determine its nonce. Every phase validates the signing book
+and rejects bits selecting seats outside that book. R2 onward also requires at least
+one selected nonidentity key.
 Round messages follow the selected nonidentity keys in address-book order, skipping
 sentinel seats even when their bit is set.
 
@@ -367,6 +370,17 @@ secret key and `SHA256(seed || 0x01)` for the PoK nonce. Each digest seeds a sep
 ChaCha20 stream, so the entire attested key is reproducible from the input seed.
 The counters are single bytes. This expansion changes the key derived from a given
 seed compared with the previous direct-seed sampling.
+
+Signing nonces bind the signing-instance entropy to both fields of the rotation
+message. The protocol decodes the message, computes
+`SHA256(protocol_instance_entropy || canonical_field_encoding(message[0]) || canonical_field_encoding(message[1]))`,
+and uses that digest to seed ChaCha20 before sampling the nonce scalar. Field encodings
+are the canonical `PrimeField::to_repr` bytes, in message order, without a bincode
+envelope. Reuse the same entropy and message only across the three rounds of one
+signing instance. Each signer must choose fresh entropy for every new signing
+instance: the same entropy and message produce the same nonce even if the other
+signers or their round messages change. This changes signing transcripts, but does
+not change the circuit or require new Nova setup parameters.
 
 ## Signing: what a signer has to do itself
 

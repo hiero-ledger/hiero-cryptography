@@ -192,8 +192,8 @@ impl SigningFixture {
     let bits = BitVector::from(core::array::from_fn(|i| i == 0 || i == 2));
     let seeds = [[21; ENTROPY_SIZE], [22; ENTROPY_SIZE]];
     let participants = [members[0].1 .0, members[2].1 .0];
-    let round1 = seeds.map(Multisig::<E2>::round1);
-    let round2 = seeds.map(Multisig::<E2>::round2);
+    let round1 = seeds.map(|seed| Multisig::<E2>::round1(seed, &typed_message));
+    let round2 = seeds.map(|seed| Multisig::<E2>::round2(seed, &typed_message));
     let round3 = [0usize, 2]
       .into_iter()
       .enumerate()
@@ -1027,10 +1027,43 @@ fn nonce_commitments_are_deterministic_and_distinguish_nonces() {
 
   // Round 1 is the commitment, so it inherits all of that.
   let seed = [5u8; ENTROPY_SIZE];
+  let msg = arbitrary_message();
   assert_eq!(
-    Multisig::<E2>::round1(seed),
-    Multisig::<E2>::commit_nonce(&(<E2 as Engine>::GE::gen() * Multisig::<E2>::nonce(seed)))
+    Multisig::<E2>::round1(seed, &msg),
+    Multisig::<E2>::commit_nonce(&(<E2 as Engine>::GE::gen() * Multisig::<E2>::nonce(seed, &msg)))
   );
+}
+
+#[test]
+fn multisig_nonce_binds_entropy_and_both_message_components() {
+  use rand_core::SeedableRng;
+
+  let seed = [5u8; ENTROPY_SIZE];
+  let msg = arbitrary_message();
+  // Independently computed SHA-256 vector for 32 bytes of 0x05, followed by the
+  // canonical 32-byte little-endian field encodings of 7 and 11, with no framing.
+  let expected_seed = [
+    236, 1, 131, 110, 15, 47, 73, 155, 140, 109, 194, 73, 238, 162, 180, 182, 123, 87, 153, 21, 91,
+    10, 132, 205, 167, 160, 110, 64, 219, 160, 94, 86,
+  ];
+  let expected_nonce =
+    SchnorrNonce::<E2>::random(&mut rand_chacha::ChaCha20Rng::from_seed(expected_seed));
+  let nonce = Multisig::<E2>::nonce(seed, &msg);
+  let round1 = Multisig::<E2>::round1(seed, &msg);
+  assert_eq!(nonce, expected_nonce);
+  assert_eq!(nonce, Multisig::<E2>::nonce(seed, &msg));
+  assert_eq!(round1, Multisig::<E2>::round1(seed, &msg));
+
+  let mut different_seed = seed;
+  different_seed[0] ^= 1;
+  assert_ne!(nonce, Multisig::<E2>::nonce(different_seed, &msg));
+  assert_ne!(round1, Multisig::<E2>::round1(different_seed, &msg));
+  for component in 0..msg.len() {
+    let mut different_msg = msg;
+    different_msg[component] += Base::ONE;
+    assert_ne!(nonce, Multisig::<E2>::nonce(seed, &different_msg));
+    assert_ne!(round1, Multisig::<E2>::round1(seed, &different_msg));
+  }
 }
 
 #[test]
@@ -1048,11 +1081,11 @@ fn signing_protocol_rejects_a_nonce_that_does_not_open_its_commitment() {
     .collect::<Vec<_>>();
   let round1 = seeds
     .iter()
-    .map(|s| Multisig::<E2>::round1(*s))
+    .map(|s| Multisig::<E2>::round1(*s, &msg))
     .collect::<Vec<_>>();
   let mut round2 = seeds
     .iter()
-    .map(|s| Multisig::<E2>::round2(*s))
+    .map(|s| Multisig::<E2>::round2(*s, &msg))
     .collect::<Vec<_>>();
 
   // A signer who tries to choose its nonce after seeing the others is caught in round
@@ -1099,14 +1132,14 @@ fn one_seed_per_instance_spans_all_three_rounds() {
     .collect::<Vec<_>>();
   let round1 = seeds
     .iter()
-    .map(|s| Multisig::<E2>::round1(*s))
+    .map(|s| Multisig::<E2>::round1(*s, &msg))
     .collect::<Vec<_>>();
 
   // Carrying the seed forward is what makes round 2 open round 1: the rounds hold no
   // state, so the nonce has to come back out of the same entropy.
   let round2 = seeds
     .iter()
-    .map(|s| Multisig::<E2>::round2(*s))
+    .map(|s| Multisig::<E2>::round2(*s, &msg))
     .collect::<Vec<_>>();
   assert!(Multisig::<E2>::round3(
     &pc,
@@ -1122,7 +1155,7 @@ fn one_seed_per_instance_spans_all_three_rounds() {
   // Switching seeds mid-instance breaks it, and is caught as a failed opening rather
   // than silently producing an unverifiable signature.
   let mut divergent = round2.clone();
-  divergent[0] = Multisig::<E2>::round2(rand::thread_rng().gen());
+  divergent[0] = Multisig::<E2>::round2(rand::thread_rng().gen(), &msg);
   let err = Multisig::<E2>::round3(
     &pc,
     seeds[0],
@@ -1138,13 +1171,49 @@ fn one_seed_per_instance_spans_all_three_rounds() {
     "expected signer 0's opening to fail, got: {err}"
   );
 
-  // Across instances the seed must change, and nothing in the API can enforce that —
-  // reusing one silently repeats the nonce, which is what the contract forbids.
-  let other_instance = Multisig::<E2>::round1(seeds[0]);
+  // Reusing both the seed and message repeats the nonce, so callers must still use
+  // fresh entropy for each instance even though distinct messages now separate nonces.
+  let other_instance = Multisig::<E2>::round1(seeds[0], &msg);
   assert_eq!(
     other_instance, round1[0],
-    "a repeated seed repeats the nonce commitment; the caller owns this"
+    "repeated entropy and message repeat the nonce commitment"
   );
+}
+
+#[test]
+fn signing_protocol_rejects_message_changes_between_rounds() {
+  use SigningProtocolPhase::{R2, R3};
+  let f = SigningFixture::new();
+  let message = decode::<RotationMessage<E2>>(&f.message).unwrap();
+
+  for component in 0..message.len() {
+    let mut changed = message;
+    changed[component] += Base::ONE;
+    let changed = encode(&changed).unwrap();
+    for phase in [R2, R3] {
+      assert!(
+        WRAPS::signing_protocol(
+          phase,
+          Some(f.seeds[0]),
+          &changed,
+          (phase == R3).then_some(&f.keys[0]),
+          &f.book,
+          f.bits,
+          &f.rounds[0],
+          if phase == R3 { &f.rounds[1] } else { &[] },
+          &[],
+        )
+        .is_err(),
+        "{phase:?} accepted a change to message component {component}"
+      );
+    }
+
+    // A new transcript over the changed message still completes through the public
+    // API and verifies, so rejection above comes from mixing protocol instances.
+    let signature = threshold_sign(&changed, &f.book, &f.keys, &f.bits);
+    assert!(WRAPS::verify_signature(&f.book, &changed, &signature).unwrap());
+    assert!(!WRAPS::verify_signature(&f.book, &f.message, &signature).unwrap());
+  }
 }
 
 #[test]
@@ -1155,13 +1224,24 @@ fn signing_protocol_enforces_its_round_order() {
   let key = Some(&f.keys[0]);
   let phases = [R1, R2, R3, Aggregate];
 
-  // A signer can commit before receiving the book or rotation message.
+  // A signer can commit before receiving the signing book, but needs the message.
   assert_eq!(
-    WRAPS::signing_protocol(R1, seed, [], None, &vec![], [], &[], &[], &[]).unwrap(),
+    WRAPS::signing_protocol(R1, seed, &f.message, None, &vec![], [], &[], &[], &[]).unwrap(),
     SigningProtocolObject::ProtocolMessage(f.rounds[0][0].clone())
   );
   assert_eq!(
-    WRAPS::signing_protocol(R2, seed, [], None, &f.book, f.bits, &f.rounds[0], &[], &[]).unwrap(),
+    WRAPS::signing_protocol(
+      R2,
+      seed,
+      &f.message,
+      None,
+      &f.book,
+      f.bits,
+      &f.rounds[0],
+      &[],
+      &[]
+    )
+    .unwrap(),
     SigningProtocolObject::ProtocolMessage(f.rounds[1][0].clone())
   );
   assert_eq!(
@@ -1238,7 +1318,7 @@ fn signing_protocol_enforces_its_round_order() {
 
 #[test]
 fn signing_protocol_rejects_malformed_or_wrong_round_bytes() {
-  use SigningProtocolPhase::{Aggregate, R2, R3};
+  use SigningProtocolPhase::{Aggregate, R1, R2, R3};
   let f = SigningFixture::new();
 
   for (round, phase) in [R2, R3, Aggregate].into_iter().enumerate() {
@@ -1284,22 +1364,20 @@ fn signing_protocol_rejects_malformed_or_wrong_round_bytes() {
     trailing,
     vec![255; 64],
   ] {
-    for phase in [R3, Aggregate] {
+    for (index, phase) in [R1, R2, R3, Aggregate].into_iter().enumerate() {
+      let histories: [&[SigningProtocolMessage]; 3] =
+        core::array::from_fn(|round| if round < index { &f.rounds[round][..] } else { &[] });
       assert!(matches!(
         WRAPS::signing_protocol(
           phase,
-          (phase == R3).then_some(f.seeds[0]),
+          (phase != Aggregate).then_some(f.seeds[0]),
           &malformed,
           (phase == R3).then_some(&f.keys[0]),
           &f.book,
           f.bits,
-          &f.rounds[0],
-          &f.rounds[1],
-          if phase == Aggregate {
-            &f.rounds[2]
-          } else {
-            &[]
-          },
+          histories[0],
+          histories[1],
+          histories[2],
         ),
         Err(WrapsError::InvalidInput(_))
       ));
@@ -1402,19 +1480,32 @@ fn signing_protocol_validates_the_selected_book() {
   let seed = Some(f.seeds[0]);
   let mut outside = f.bits;
   outside[f.book.len()] = true;
-  assert!(WRAPS::signing_protocol(R1, seed, [], None, &f.book, outside, &[], &[], &[],).is_err());
+  assert!(
+    WRAPS::signing_protocol(R1, seed, &f.message, None, &f.book, outside, &[], &[], &[],).is_err()
+  );
   for bits in [outside, BitVector::from([false; MAX_AB_SIZE])] {
-    assert!(
-      WRAPS::signing_protocol(R2, seed, [], None, &f.book, bits, &f.rounds[0], &[], &[],).is_err()
-    );
+    assert!(WRAPS::signing_protocol(
+      R2,
+      seed,
+      &f.message,
+      None,
+      &f.book,
+      bits,
+      &f.rounds[0],
+      &[],
+      &[],
+    )
+    .is_err());
   }
   signature.0 = outside;
   assert!(!WRAPS::verify_signature(&f.book, &f.message, &signature).unwrap());
-  assert!(WRAPS::signing_protocol(R2, seed, [], None, &vec![], [], &[], &[], &[],).is_err());
+  assert!(
+    WRAPS::signing_protocol(R2, seed, &f.message, None, &vec![], [], &[], &[], &[],).is_err()
+  );
   assert!(WRAPS::signing_protocol(
     R1,
     seed,
-    [],
+    &f.message,
     None,
     &f.book,
     [false; MAX_AB_SIZE + 1],
@@ -1424,14 +1515,16 @@ fn signing_protocol_validates_the_selected_book() {
   )
   .is_err());
   let oversized = vec![f.book[0].clone(); MAX_AB_SIZE + 1];
-  assert!(WRAPS::signing_protocol(R1, seed, [], None, &oversized, [], &[], &[], &[],).is_err());
+  assert!(
+    WRAPS::signing_protocol(R1, seed, &f.message, None, &oversized, [], &[], &[], &[],).is_err()
+  );
   let mut invalid_book = f.book.clone();
   invalid_book[0].1 .1.response += SchnorrResponse::<E2>::ONE;
   for phase in [R1, R2] {
     assert!(WRAPS::signing_protocol(
       phase,
       seed,
-      [],
+      &f.message,
       None,
       &invalid_book,
       f.bits,
@@ -1598,8 +1691,8 @@ fn cancelling_attested_keys_are_rejected_natively_and_in_circuit() {
   let message = WRAPS::compute_rotation_message(&book, b"cancelled keys").unwrap();
   let typed = decode::<RotationMessage<E2>>(&message).unwrap();
   let seeds = [[41; ENTROPY_SIZE], [42; ENTROPY_SIZE]];
-  let round1 = seeds.map(Multisig::<E2>::round1);
-  let round2 = seeds.map(Multisig::<E2>::round2);
+  let round1 = seeds.map(|seed| Multisig::<E2>::round1(seed, &typed));
+  let round2 = seeds.map(|seed| Multisig::<E2>::round2(seed, &typed));
   assert!(
     Multisig::<E2>::round3(&pc, seeds[0], &typed, &sk, &participants, &round1, &round2).is_err()
   );

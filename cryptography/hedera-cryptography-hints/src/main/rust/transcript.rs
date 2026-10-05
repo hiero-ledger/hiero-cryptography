@@ -28,7 +28,7 @@ impl Transcript {
     /// hashes everything absorbed so far to a field element, under `dst`
     pub(crate) fn challenge<F: PrimeField>(&self, dst: &[u8]) -> F {
         let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(dst);
-        hasher.hash_to_field(&self.bytes, 1)[0]
+        hasher.hash_to_field::<1>(&self.bytes)[0]
     }
 }
 
@@ -81,7 +81,7 @@ mod tests {
         let mut bytes = Vec::new();
         F::from(1u64).serialize_compressed(&mut bytes).unwrap();
         F::from(2u64).serialize_compressed(&mut bytes).unwrap();
-        assert_eq!(t.challenge::<F>(DST_A), hasher.hash_to_field(&bytes, 1)[0]);
+        assert_eq!(t.challenge::<F>(DST_A), hasher.hash_to_field::<1>(&bytes)[0]);
 
         // points go in compressed; Fr encodes the same either way, so a G1 point pins the choice
         let g = G1Affine::generator();
@@ -89,6 +89,6 @@ mod tests {
         p.absorb(&g).unwrap();
         let mut compressed = Vec::new();
         g.serialize_compressed(&mut compressed).unwrap();
-        assert_eq!(p.challenge::<F>(DST_A), hasher.hash_to_field(&compressed, 1)[0]);
+        assert_eq!(p.challenge::<F>(DST_A), hasher.hash_to_field::<1>(&compressed)[0]);
     }
 }

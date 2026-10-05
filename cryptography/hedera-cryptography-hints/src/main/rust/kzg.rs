@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 
 use ark_ec::{pairing::Pairing, CurveGroup};
-use ark_ec::{scalar_mul::fixed_base::FixedBase, VariableBaseMSM};
+use ark_ec::{scalar_mul::ScalarMul, VariableBaseMSM};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
 use ark_poly::DenseUVPolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -48,19 +48,8 @@ where
             cur *= &beta;
         }
 
-        let window_size = FixedBase::get_mul_window_size(max_degree + 1);
-        let scalar_bits = E::ScalarField::MODULUS_BIT_SIZE as usize;
-
-        let g_table = FixedBase::get_window_table(scalar_bits, window_size, g);
-        let powers_of_g =
-            FixedBase::msm::<E::G1>(scalar_bits, window_size, &g_table, &powers_of_beta);
-
-        let h_table = FixedBase::get_window_table(scalar_bits, window_size, h);
-        let powers_of_h =
-            FixedBase::msm::<E::G2>(scalar_bits, window_size, &h_table, &powers_of_beta);
-
-        let powers_of_g = E::G1::normalize_batch(&powers_of_g);
-        let powers_of_h = E::G2::normalize_batch(&powers_of_h);
+        let powers_of_g = g.batch_mul(&powers_of_beta);
+        let powers_of_h = h.batch_mul(&powers_of_beta);
 
         let pp = UniversalParams {
             powers_of_g,

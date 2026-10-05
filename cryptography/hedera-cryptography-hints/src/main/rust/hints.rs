@@ -304,7 +304,7 @@ impl HinTS {
         for j in 0..n {
             let num: DensePolynomial<F>; // = compute_constant_poly(&F::from(0));
             if i == j {
-                num = l_i_of_x.mul(&l_i_of_x).sub(&l_i_of_x);
+                num = (&l_i_of_x * &l_i_of_x).sub(&l_i_of_x);
             } else {
                 //cross-terms
                 let l_j_of_x = utils::lagrange_poly(n, j).ok_or(
@@ -327,11 +327,11 @@ impl HinTS {
         let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
 
         //numerator is l_i(x) - l_i(0)
-        let num = l_i_of_x.sub(&l_i_of_0_poly);
+        let num = &l_i_of_x - &l_i_of_0_poly;
         //denominator is x
         let den = utils::compute_x_monomial();
         //qx_term = sk_i * (l_i(x) - l_i(0)) / x
-        let qx_term = utils::poly_eval_mult_c(&num.div(&den), sk);
+        let qx_term = utils::poly_eval_mult_c(&(&num / &den), sk);
         //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0)) / x
         let qx_term_mul_tau = utils::poly_eval_mult_c(&num, sk);
         //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
@@ -452,7 +452,7 @@ impl HinTS {
         let den = utils::compute_x_monomial();
 
         //qx_term = (l_i(x) - l_i(0)) / x
-        let qx_term = &num.div(&den);
+        let qx_term = &(&num / &den);
         //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
         let qx_term_com = KZG::commit_g2(&crs, &qx_term)?;
         let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, crs.powers_of_h[0]);
@@ -935,11 +935,7 @@ fn prove(
     let p_mrg_of_x = merge_polys(&[&p1_of_x, &p2_of_x, &p3_of_x, &p4_of_x], &χ_q);
 
     // Z(X) = X^n - 1 is sparse, so this division takes linear time
-    let (q_mrg_of_x, remainder) = p_mrg_of_x.divide_by_vanishing_poly(domain).ok_or(
-        HinTSError::CryptographyCatastrophe(
-            format!("Unable to divide by the vanishing polynomial for n = {}", n)
-        )
-    )?;
+    let (q_mrg_of_x, remainder) = p_mrg_of_x.divide_by_vanishing_poly(domain);
     let exact = remainder.coeffs.iter().all(|c| *c == F::from(0));
     let q_mrg_of_tau_com = KZG::commit_g1(crs, &q_mrg_of_x)?;
 
@@ -1260,7 +1256,7 @@ fn proof_of_knowledge_random_oracle(
         .map_err(|e| HinTSError::EncodingError(e))?;
 
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(POP_DST);
-    Ok(hasher.hash_to_field(&serialized_data, 1)[0])
+    Ok(hasher.hash_to_field::<1>(&serialized_data)[0])
 }
 
 fn verify_opening(

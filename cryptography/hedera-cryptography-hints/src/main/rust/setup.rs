@@ -183,7 +183,7 @@ fn random_oracle(
 
     const DST: &str = "HINTS_POWERS_OF_TAU_BLS12381:FIAT_SHAMIR";
     let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(DST.as_bytes());
-    let field_elements = hasher.hash_to_field(&serialized_data, 1);
+    let field_elements = hasher.hash_to_field::<1>(&serialized_data);
 
     Ok(field_elements[0])
 }

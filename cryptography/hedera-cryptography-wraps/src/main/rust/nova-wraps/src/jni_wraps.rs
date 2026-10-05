@@ -8,8 +8,6 @@ use std::sync::OnceLock;
 
 use crate::{jni_util, WRAPS, SigningProtocolPhase, ENTROPY_SIZE, SigningProtocolMessage, SigningProtocolObject, SchnorrMultiSignature, AddressBook, AddressBookHash, SchnorrSecretKey, E2, HintsVKHash, PublicParams, CompressedVerifyingKey};
 use crate::jni_util::deserialize_from_jbyte_array;
-use crate::wraps::CompressedWrapsProof;
-use crate::{decode, encode};
 
 //const SECRET_KEY_LENGTH: usize = 32;
 

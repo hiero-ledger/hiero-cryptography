@@ -155,7 +155,21 @@ public final class TSS {
                 throw new IllegalStateException("Schnorr public keys haven't been provided");
             }
 
-            // We sign the ledgerId, so we verify using it as a message:
+            // First, check if the ledgerId and the tssSignature refer to the same hinTS VK:
+            final byte[] tssSignatureHintsVKHash = WRAPS.hashArray(hintsVerificationKey);
+            final byte[] ledgerIdHintsVKHash = Arrays.copyOfRange(ledgerId, 32, 64);
+            if (!Arrays.equals(tssSignatureHintsVKHash, ledgerIdHintsVKHash)) {
+                return false;
+            }
+
+            // Then check if the AB set via setters in this class is the same as the ledgerId
+            final byte[] setABHash = WRAPS.hashAddressBook(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds);
+            final byte[] ledgerIdABHash = Arrays.copyOfRange(ledgerId, 0, 32);
+            if (!Arrays.equals(setABHash, ledgerIdABHash)) {
+                return false;
+            }
+
+            // Finally, we sign the ledgerId, so we verify using it as a message:
             if (!WRAPS.verifySignature(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds, ledgerId, abProof)) {
                 return false;
             }

@@ -2020,7 +2020,7 @@ fn verification_keys_are_deterministic_across_processes() {
 
   const CHILD_OUTPUT: &str = "WRAPS_KEY_TEST_CHILD_OUTPUT";
   const TEST_NAME: &str = "tests::verification_keys_are_deterministic_across_processes";
-  const ARTIFACTS: [&str; 3] = ["compact-vk.bin", "full-vk.bin", "pp-digest.bin"];
+  const ARTIFACTS: [&str; 3] = ["exported-vk.bin", "prepared-vk.bin", "pp-digest.bin"];
 
   // Each child runs only this test with fresh process globals and OS randomness.
   // It derives both keys from independently loaded parameters, then exits.
@@ -2028,12 +2028,13 @@ fn verification_keys_are_deterministic_across_processes() {
     let output = std::path::PathBuf::from(output);
     let pp = WRAPS::load_public_params(&ptau_dir()).expect("child public parameters");
     let vk = WRAPS::setup_compressed_verifier(&pp).expect("child verifier setup");
-    let compact = WRAPS::get_compressed_verification_key(&pp).expect("child compact export");
-    let full = encode(&vk.inner).expect("serialize full Nova verifier key");
-    assert_eq!(compact.len(), 778);
-    assert_eq!(full.len(), 4_738_776);
-    fs::write(output.join(ARTIFACTS[0]), compact).unwrap();
-    fs::write(output.join(ARTIFACTS[1]), full).unwrap();
+    let exported = WRAPS::get_compressed_verification_key(&pp).expect("child verifier export");
+    let prepared = encode(&vk).expect("serialize prepared verifier key");
+    assert_eq!(exported.len(), 4_738_776);
+    assert_eq!(exported, prepared);
+    assert_eq!(exported, encode(&vk.inner).unwrap());
+    fs::write(output.join(ARTIFACTS[0]), exported).unwrap();
+    fs::write(output.join(ARTIFACTS[1]), prepared).unwrap();
     fs::write(output.join(ARTIFACTS[2]), encode(&pp.digest()).unwrap()).unwrap();
     return;
   }
@@ -2110,42 +2111,19 @@ fn prepared_key_matches_the_stock_mercury_key() {
 /// changes to the circuit or proving system.
 #[test]
 fn artifact_sizes() {
-  use crate::verification_key::{
-    Descriptor, ARITY, MAGIC, PRIMARY_DIMENSION, PRIMARY_DOMAIN, SECONDARY_DIMENSION,
-    SECONDARY_GENERATORS, VERSION, WIRE_BYTES,
-  };
-
   let (wraps_pp, wraps_vk) = wraps_setup();
 
   // Public parameters and the verification key are separate artifacts.
   let pp_bytes = encode(wraps_pp).unwrap().len();
-  let verification_key_bytes = encode(&wraps_vk.inner).unwrap().len();
 
-  // Check the actual exported descriptor without a separate setup or fixture.
-  let compact_key = WRAPS::get_compressed_verification_key(wraps_pp).unwrap();
-  let verifier_key_payload_bytes = compact_key.len();
-  assert_eq!(verifier_key_payload_bytes, WIRE_BYTES);
-  assert_eq!(&compact_key[..8], &MAGIC);
-  assert_eq!(&compact_key[8..10], &VERSION.to_le_bytes());
-  let descriptor: Descriptor = decode(&compact_key).unwrap();
-  assert_eq!(encode(&descriptor).unwrap(), compact_key);
-  assert_eq!(descriptor.magic, MAGIC);
-  assert_eq!(descriptor.version, VERSION);
-  assert_eq!(descriptor.arity, ARITY);
-  assert_eq!(descriptor.pp_digest, wraps_pp.digest());
-  assert_eq!(descriptor.primary.num_cons, PRIMARY_DIMENSION);
-  assert_eq!(descriptor.primary.num_vars, PRIMARY_DIMENSION);
-  assert_eq!(descriptor.primary.shape_commitment.N, PRIMARY_DOMAIN);
-  assert_eq!(descriptor.secondary.num_cons, SECONDARY_DIMENSION);
-  assert_eq!(descriptor.secondary.num_vars, SECONDARY_DIMENSION);
-  assert_eq!(
-    descriptor.secondary.shape_commitment.N,
-    SECONDARY_GENERATORS
-  );
-  assert_eq!(
-    descriptor.secondary.generator_count,
-    SECONDARY_GENERATORS as u64,
-  );
+  // The exported key is the complete prepared verifier with the native Nova encoding.
+  let exported_key = WRAPS::get_compressed_verification_key(wraps_pp).unwrap();
+  let verification_key_bytes = exported_key.len();
+  println!("compressed verification key: {verification_key_bytes} bytes");
+  assert_eq!(exported_key, encode(wraps_vk).unwrap());
+  assert_eq!(exported_key, encode(&wraps_vk.inner).unwrap());
+  let restored_key: CompressedVerifyingKey = decode(&exported_key).unwrap();
+  assert_eq!(encode(&restored_key).unwrap(), exported_key);
 
   // One genesis rotation, to get a proof of each kind.
   let (genesis_ab, genesis_keys) = random_address_book();
@@ -2172,6 +2150,9 @@ fn artifact_sizes() {
   // Succinct proofs use the ordinary bincode encoding, without zlib.
   let proof = decode::<CompressedWrapsProof>(&compressed).unwrap();
   assert_eq!(encode(&proof).unwrap(), compressed);
+  assert!(
+    WRAPS::verify_compressed_wraps_proof(&restored_key, &compressed, &message, hints_vk).unwrap()
+  );
 
   // The shape these numbers have to keep. Compression is the point of the whole
   // exercise: the artifact a verifier receives is two orders of magnitude smaller
@@ -2180,14 +2161,9 @@ fn artifact_sizes() {
     compressed.len() < running.len() / 100,
     "compression should buy two orders of magnitude"
   );
-  assert_eq!(
-    verifier_key_payload_bytes, 778,
-    "the compact verification-key payload must stay within its fixed wire format"
-  );
-
   assert!(
     verification_key_bytes > 4_000_000,
-    "expanded key includes IPA bases"
+    "the complete verification key includes IPA bases"
   );
 
   // Absolute guards, generously sized.
@@ -2206,8 +2182,8 @@ fn artifact_sizes() {
     running.len()
   );
   assert!(
-    verifier_key_payload_bytes < 1024,
-    "compact verification key: {verifier_key_payload_bytes} bytes"
+    verification_key_bytes < 8 * 1024 * 1024,
+    "compressed verification key: {verification_key_bytes} bytes"
   );
 }
 

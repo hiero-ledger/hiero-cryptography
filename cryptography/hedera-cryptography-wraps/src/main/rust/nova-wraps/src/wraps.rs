@@ -10,7 +10,6 @@ use crate::{
     SchnorrPublicKey, SchnorrResponse, SchnorrSecretKey, Signature,
   },
   utils::{decode, encode, encode_point, expand_seed, pad_bitvector, BitVector},
-  verification_key,
 };
 use ff::Field;
 use nova_snark::{
@@ -325,6 +324,9 @@ pub(crate) type NovaVerifierKey = nova::VerifierKey<E1, E2, C, S1, S2>;
 /// Derive this from public parameters with [`WRAPS::setup_compressed_verifier`].
 /// It owns its verification material and can outlive the parameters. Reuse it
 /// across proof checks to retain Nova's cached verifier-key digests.
+/// Supports [`encode`] and [`decode`] using the underlying Nova key's serialization.
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct CompressedVerifyingKey {
   pub(crate) inner: NovaVerifierKey,
 }
@@ -690,14 +692,15 @@ impl WRAPS {
     Ok(CompressedVerifyingKey { inner })
   }
 
-  /// Exports the compact verification-key descriptor.
+  /// Derives and serializes the verifier key for compressed WRAPS proofs.
   ///
-  /// This 778-byte, versioned descriptor includes application-specific values,
-  /// the ceremony-dependent PCS key, and small fixed secondary-key fields.
-  /// Poseidon constants and IPA generator arrays are omitted. This is an export
-  /// format; [`Self::setup_compressed_verifier`] takes public parameters directly.
+  /// Encodes the full [`CompressedVerifyingKey`] returned by
+  /// [`Self::setup_compressed_verifier`] with [`encode`], including its Poseidon
+  /// constants and IPA generators. Decode the bytes as [`CompressedVerifyingKey`]
+  /// to retain and reuse the key for verification.
   pub fn get_compressed_verification_key(pp: &PublicParams) -> Result<Vec<u8>, WrapsError> {
-    verification_key::export(pp)
+    let vk = Self::setup_compressed_verifier(pp)?;
+    encode(&vk)
   }
 
   /// Folds one rotation into the chain and compresses the result.
@@ -892,8 +895,9 @@ impl WRAPS {
 
   /// Checks a compressed proof against a prepared verifier key.
   ///
-  /// Only the proof and ledger ID are decoded. Constants, generators, and the verifier-key
-  /// digests computed during setup are reused across calls.
+  /// Only the proof and ledger ID are decoded. Constants, generators, and cached
+  /// verifier-key digests are reused across calls. A deserialized key initializes
+  /// its digest caches on the first verification.
   ///
   /// Beyond the SNARK itself this pins the two ends of the chain: it must start at
   /// the address-book hash in `ledger_id` and must currently carry `hints_vk`.

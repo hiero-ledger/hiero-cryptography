@@ -7,9 +7,10 @@
 //! serialized checkpoint is retained: public parameters, genesis hash, ledger ID,
 //! committee, signing keys, running proof, and rotation count. Each iteration restores those
 //! values and derives a fresh compressed verifier from the decoded parameters.
-//! Compact export is measured separately from verifier setup. Key generation
-//! and signing show one representative member per book/phase. Only sizes, never key
-//! or seed bytes, are printed. Payload sizes are separate from demo transport envelopes.
+//! Verifier-key export (setup plus bincode encoding) is measured separately from
+//! verifier setup. Key generation and signing show one representative member per
+//! book/phase. Only sizes, never key or seed bytes, are printed. Payload sizes are
+//! separate from demo transport envelopes.
 //!
 //! Needs power-20 or larger powers-of-tau files. Put `ppot_pruned_XX.ptau` under
 //! `params/`, or point `WRAPS_PTAU_DIR` at a directory holding them:
@@ -45,7 +46,7 @@ fn main() {
   println!("=========================================================");
 
   let num_steps = 10;
-  println!("Serializable values use bincode legacy; compact keys have a versioned encoding.");
+  println!("Serializable values, including full verifier keys, use bincode legacy.");
   let dir = round_trip("load_public_params input: ptau_dir", ptau_dir());
   println!("Loading public parameters from {}...", dir.display());
   // The same parameters support proving and independent running-proof verification.
@@ -57,13 +58,16 @@ fn main() {
     pp,
   );
   let start = Instant::now();
-  let vk_bytes = WRAPS::get_compressed_verification_key(&pp).expect("compact verifier key");
+  let vk_bytes = WRAPS::get_compressed_verification_key(&pp).expect("serialized verifier key");
   println!(
     "WRAPS::get_compressed_verification_key, took {:?}",
     start.elapsed()
   );
   let vk_bytes = round_trip("get_compressed_verification_key return: Vec<u8>", vk_bytes);
-  println!("Compact verification key payload: {} bytes", vk_bytes.len());
+  println!(
+    "Full verification key payload (bincode): {} bytes",
+    vk_bytes.len()
+  );
   let (primary, secondary) = pp.num_constraints();
   println!("Number of constraints per step (primary circuit): {primary}");
   println!("Number of constraints per step (secondary circuit): {secondary}");

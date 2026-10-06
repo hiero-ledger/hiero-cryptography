@@ -86,7 +86,6 @@ mod error;
 mod poseidon;
 mod schnorr;
 mod utils;
-mod verification_key;
 mod wraps;
 mod jni_util;
 mod jni_wraps;

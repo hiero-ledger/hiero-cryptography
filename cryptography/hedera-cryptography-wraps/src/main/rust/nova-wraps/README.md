@@ -96,10 +96,10 @@ directly through Nova. Once prepared, that key owns everything needed for compre
 verification and does not retain a reference to the public parameters:
 
 ```rust
-use wraps::{decode, CompressedVerifyingKey, PublicParams, WRAPS};
+use wraps::{decode, encode, CompressedVerifyingKey, PublicParams, WRAPS};
 
 let pp: PublicParams = WRAPS::load_public_params(&ptau_dir)?;
-let serialized_vk: Vec<u8> = WRAPS::get_compressed_verification_key(&pp)?;
+let serialized_vk: Vec<u8> = encode(&WRAPS::setup_compressed_verifier(&pp)?)?;
 
 // Deserialize the exported key and retain it across compressed proof checks.
 let compressed_vk: CompressedVerifyingKey = decode(&serialized_vk)?;
@@ -134,9 +134,9 @@ deserialize `PublicParams` there and call `setup_compressed_verifier`.
 Uncompressed verification uses `&PublicParams` directly; those parameters support
 `encode` and `decode`, with no separate verifier setup or wrapper.
 
-`get_compressed_verification_key(&pp)` calls `setup_compressed_verifier(&pp)` and
-serializes the returned `CompressedVerifyingKey` with `encode`. Its transparent
-Serde wrapper preserves the underlying Nova verifier-key encoding.
+Serialize the `CompressedVerifyingKey` returned by `setup_compressed_verifier(&pp)`
+with `encode`. Its transparent Serde wrapper preserves the underlying Nova
+verifier-key encoding.
 
 The public API has no separate prover-key setup. `construct_wraps_proof` derives
 Nova's prover and compressed verifier keys together on every call, so its runtime
@@ -178,15 +178,15 @@ It checks serialization round trips with `encode` and `decode` throughout all th
 rotations. Only the last rotation prints a size report: one row per named type or
 struct, with separate enum variants where their sizes differ. This includes full
 public parameters, signing payloads, and transport messages.
-A separate table reports raw proof and serialized verification-key payload sizes
-exposed by the API as `Vec<u8>`. The prepared verifier is retained locally for reuse;
+A separate table reports raw proof payload sizes and the size of the verification
+key serialized by the example. The prepared verifier is retained locally for reuse;
 its serialized size is represented by the verification-key payload entry.
 Both size tables use decimal KB (`1 KB = 1000 bytes`) with three decimal places.
 
 The final timing table lists calls, total milliseconds, and mean milliseconds for
-each `WRAPS` method the example invokes. Public-parameter loading, verifier-key
-export, and compressed-verifier setup are each timed separately once. Export includes
-compressed-verifier setup and serialization.
+each `WRAPS` method the example invokes. Public-parameter loading and
+compressed-verifier setup are each timed separately once. The example serializes
+the retained verifier outside the timed setup call.
 Proof-construction timing includes internal key derivation and both proof checks.
 Per-rotation calls are measured on the third rotation. Timings cover the library call, including
 its internal work, and exclude the example's serialization checks, random input

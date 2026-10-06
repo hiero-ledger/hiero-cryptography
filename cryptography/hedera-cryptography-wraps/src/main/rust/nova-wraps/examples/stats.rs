@@ -3,7 +3,7 @@
 //!
 //! Serializable inputs, outputs, and broadcasts are round-tripped with the shared
 //! encode/decode helpers. A compressed verifier is prepared from the public parameters
-//! and retained. Full verifier-key export is measured and round-tripped independently.
+//! and retained. The caller encodes the same verifier and round-trips its bytes.
 //! Uncompressed verification uses the retained public parameters directly.
 //! The final rotation prints one compact table of individual named types, with
 //! separate rows for enum variants whose encodings differ. Setup artifacts
@@ -11,7 +11,7 @@
 //! Sizes use decimal KB (1 KB = 1,000 bytes). A timing table covers initialization
 //! and the final rotation, excluding example serialization and reporting overhead.
 //! Proof construction includes internal key derivation and checking both proof forms.
-//! Verifier-key export includes verifier setup and bincode encoding.
+//! Verifier-key encoding is outside the timed verifier setup call.
 //! Serialization checks are silent; secret values are never printed.
 //!
 //! Needs power-20 or larger powers-of-tau files under params/, or WRAPS_PTAU_DIR:
@@ -54,21 +54,16 @@ fn main() {
       })
       .expect("load powers-of-tau parameters"),
   );
-  let vk_bytes = round_trip(
-    "serialized verification key: Vec<u8>",
-    &setup_timings
-      .measure("WRAPS::get_compressed_verification_key", || {
-        WRAPS::get_compressed_verification_key(&pp)
-      })
-      .expect("serialized verifier key"),
-  );
-  // Prepare independently from the retained public parameters. The resulting
-  // verifier stays local and is reused across rotations.
+  // Prepare once, then serialize the same verifier and reuse it across rotations.
   let vk = setup_timings
     .measure("WRAPS::setup_compressed_verifier", || {
       WRAPS::setup_compressed_verifier(&pp)
     })
     .expect("compressed verifier setup");
+  let vk_bytes = round_trip(
+    "encoded CompressedVerifyingKey: Vec<u8>",
+    &encode(&vk).expect("serialize verifier key"),
+  );
   let mut quiet_timings = TimingReport::new(false);
   let mut previous = random_address_book(&mut quiet_timings);
   let genesis_hash = round_trip(
@@ -538,7 +533,7 @@ impl SizeReport {
     for (name, bytes) in &self.types {
       println!("{name:<name_width$} {:>12.3}", *bytes as f64 / 1000.0);
     }
-    println!("\nEncoded artifacts as returned by WRAPS (excluding Vec framing):");
+    println!("\nEncoded proof, verifier-key, and ledger-ID payloads (excluding Vec framing):");
     println!("{:<46} {:>12}", "Artifact", "KB");
     for (name, bytes) in &self.artifacts {
       println!("{name:<46} {:>12.3}", *bytes as f64 / 1000.0);

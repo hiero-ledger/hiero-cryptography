@@ -2020,22 +2020,19 @@ fn verification_keys_are_deterministic_across_processes() {
 
   const CHILD_OUTPUT: &str = "WRAPS_KEY_TEST_CHILD_OUTPUT";
   const TEST_NAME: &str = "tests::verification_keys_are_deterministic_across_processes";
-  const ARTIFACTS: [&str; 3] = ["exported-vk.bin", "prepared-vk.bin", "pp-digest.bin"];
+  const ARTIFACTS: [&str; 2] = ["verifier-key.bin", "pp-digest.bin"];
 
   // Each child runs only this test with fresh process globals and OS randomness.
-  // It derives both keys from independently loaded parameters, then exits.
+  // It derives the key from independently loaded parameters, then exits.
   if let Some(output) = std::env::var_os(CHILD_OUTPUT) {
     let output = std::path::PathBuf::from(output);
     let pp = WRAPS::load_public_params(&ptau_dir()).expect("child public parameters");
     let vk = WRAPS::setup_compressed_verifier(&pp).expect("child verifier setup");
-    let exported = WRAPS::get_compressed_verification_key(&pp).expect("child verifier export");
     let prepared = encode(&vk).expect("serialize prepared verifier key");
-    assert_eq!(exported.len(), 4_738_776);
-    assert_eq!(exported, prepared);
-    assert_eq!(exported, encode(&vk.inner).unwrap());
-    fs::write(output.join(ARTIFACTS[0]), exported).unwrap();
-    fs::write(output.join(ARTIFACTS[1]), prepared).unwrap();
-    fs::write(output.join(ARTIFACTS[2]), encode(&pp.digest()).unwrap()).unwrap();
+    assert_eq!(prepared.len(), 4_738_776);
+    assert_eq!(prepared, encode(&vk.inner).unwrap());
+    fs::write(output.join(ARTIFACTS[0]), prepared).unwrap();
+    fs::write(output.join(ARTIFACTS[1]), encode(&pp.digest()).unwrap()).unwrap();
     return;
   }
 
@@ -2116,14 +2113,13 @@ fn artifact_sizes() {
   // Public parameters and the verification key are separate artifacts.
   let pp_bytes = encode(wraps_pp).unwrap().len();
 
-  // The exported key is the complete prepared verifier with the native Nova encoding.
-  let exported_key = WRAPS::get_compressed_verification_key(wraps_pp).unwrap();
-  let verification_key_bytes = exported_key.len();
+  // Callers serialize the complete prepared verifier with the native Nova encoding.
+  let serialized_key = encode(wraps_vk).unwrap();
+  let verification_key_bytes = serialized_key.len();
   println!("compressed verification key: {verification_key_bytes} bytes");
-  assert_eq!(exported_key, encode(wraps_vk).unwrap());
-  assert_eq!(exported_key, encode(&wraps_vk.inner).unwrap());
-  let restored_key: CompressedVerifyingKey = decode(&exported_key).unwrap();
-  assert_eq!(encode(&restored_key).unwrap(), exported_key);
+  assert_eq!(serialized_key, encode(&wraps_vk.inner).unwrap());
+  let restored_key: CompressedVerifyingKey = decode(&serialized_key).unwrap();
+  assert_eq!(encode(&restored_key).unwrap(), serialized_key);
 
   // One genesis rotation, to get a proof of each kind.
   let (genesis_ab, genesis_keys) = random_address_book();

@@ -683,24 +683,13 @@ impl WRAPS {
   ///
   /// Uses Nova's setup with the constants and commitment keys already in `pp`.
   /// Setup initializes the verifier-key digest caches. The returned key owns its
-  /// verification material; reuse it across proofs.
+  /// verification material; reuse it across proofs or serialize it with [`encode`].
   pub fn setup_compressed_verifier(
     pp: &PublicParams,
   ) -> Result<CompressedVerifyingKey, WrapsError> {
     let (_, inner) = CompressedSNARK::<_, _, _, S1, S2>::setup(pp)
       .map_err(|e| WrapsError::cryptography(format!("compressed verifier setup failed: {e}")))?;
     Ok(CompressedVerifyingKey { inner })
-  }
-
-  /// Derives and serializes the verifier key for compressed WRAPS proofs.
-  ///
-  /// Encodes the full [`CompressedVerifyingKey`] returned by
-  /// [`Self::setup_compressed_verifier`] with [`encode`], including its Poseidon
-  /// constants and IPA generators. Decode the bytes as [`CompressedVerifyingKey`]
-  /// to retain and reuse the key for verification.
-  pub fn get_compressed_verification_key(pp: &PublicParams) -> Result<Vec<u8>, WrapsError> {
-    let vk = Self::setup_compressed_verifier(pp)?;
-    encode(&vk)
   }
 
   /// Folds one rotation into the chain and compresses the result.

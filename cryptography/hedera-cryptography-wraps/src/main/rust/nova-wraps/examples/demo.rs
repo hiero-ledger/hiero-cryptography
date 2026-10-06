@@ -7,8 +7,8 @@
 //! serialized checkpoint is retained: public parameters, genesis hash, ledger ID,
 //! committee, signing keys, running proof, and rotation count. Each iteration restores those
 //! values and derives a fresh compressed verifier from the decoded parameters.
-//! Verifier-key export (setup plus bincode encoding) is measured separately from
-//! verifier setup. Key generation and signing show one representative member per
+//! Initial verifier setup and encoding are timed together. Each restored checkpoint
+//! also times its verifier setup. Key generation and signing show one representative member per
 //! book/phase. Only sizes, never key or seed bytes, are printed. Payload sizes are
 //! separate from demo transport envelopes.
 //!
@@ -58,12 +58,13 @@ fn main() {
     pp,
   );
   let start = Instant::now();
-  let vk_bytes = WRAPS::get_compressed_verification_key(&pp).expect("serialized verifier key");
+  let vk_bytes = encode(&WRAPS::setup_compressed_verifier(&pp).expect("compressed verifier setup"))
+    .expect("serialize verifier key");
   println!(
-    "WRAPS::get_compressed_verification_key, took {:?}",
+    "WRAPS::setup_compressed_verifier + encode, took {:?}",
     start.elapsed()
   );
-  let vk_bytes = round_trip("get_compressed_verification_key return: Vec<u8>", vk_bytes);
+  let vk_bytes = round_trip("encoded CompressedVerifyingKey: Vec<u8>", vk_bytes);
   println!(
     "Full verification key payload (bincode): {} bytes",
     vk_bytes.len()

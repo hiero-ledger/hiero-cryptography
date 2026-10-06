@@ -31,13 +31,7 @@ public class TSSTest {
 
     @Test
     void testComposeSignature() {
-        // Happy cases first
-        assertArrayEquals(
-                TSSTestConstants.TSS_SIGNATURE_WITH_SCHNORR,
-                TSS.composeSignature(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE));
+        // Happy case first
         assertArrayEquals(
                 TSSTestConstants.TSS_SIGNATURE_WITH_WRAPS,
                 TSS.composeSignature(
@@ -166,18 +160,7 @@ public class TSSTest {
         // A fixed seed for reproducibility:
         final Random rnd = new Random(945863847);
 
-        // Two happy cases first:
-
-        TSS.setAddressBook(TSSTestConstants.SCHNORR_PUBLIC_KEYS, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
-        assertTrue(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                TSSTestConstants.MESSAGE));
-
-        TSS.setAddressBook(null, null, null);
+        // A happy case first:
         assertTrue(TSS.verifyTSS(
                 TSSTestConstants.LEDGER_ID,
                 concat(
@@ -223,62 +206,9 @@ public class TSSTest {
                         TSSCompressedWRAPSProof.COMPRESSED_WRAPS_PROOF),
                 rnd(TSSTestConstants.MESSAGE, rnd)));
 
-        TSS.setAddressBook(TSSTestConstants.SCHNORR_PUBLIC_KEYS, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
-        assertFalse(TSS.verifyTSS(
-                rnd(TSSTestConstants.LEDGER_ID, rnd),
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                TSSTestConstants.MESSAGE));
-        assertFalse(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        rnd(TSSTestConstants.HINTS_VERIFICATION_KEY, rnd),
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                TSSTestConstants.MESSAGE));
-        assertFalse(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        rnd(TSSTestConstants.HINTS_SIGNATURE, rnd),
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                TSSTestConstants.MESSAGE));
-        assertFalse(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        rnd(TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE, rnd)),
-                TSSTestConstants.MESSAGE));
-        assertFalse(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                rnd(TSSTestConstants.MESSAGE, rnd)));
-        final byte[][] badSchnorrKeys = new byte[TSSTestConstants.SCHNORR_PUBLIC_KEYS.length][];
-        for (int i = 0; i < TSSTestConstants.SCHNORR_PUBLIC_KEYS.length; i++) {
-            badSchnorrKeys[i] = TSSTestConstants.SCHNORR_PUBLIC_KEYS[i];
-            if (i == 0) {
-                badSchnorrKeys[i] = rnd(badSchnorrKeys[i], rnd);
-            }
-        }
-        TSS.setAddressBook(badSchnorrKeys, TSSTestConstants.WEIGHTS, TSSTestConstants.NODE_IDS);
-        assertFalse(TSS.verifyTSS(
-                TSSTestConstants.LEDGER_ID,
-                concat(
-                        TSSTestConstants.HINTS_VERIFICATION_KEY,
-                        TSSTestConstants.HINTS_SIGNATURE,
-                        TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
-                TSSTestConstants.MESSAGE));
-
-        // Then test the missing keys
-        TSS.setAddressBook(null, null, null);
+        // And finally check bad args
         assertThrows(
-                IllegalStateException.class,
+                IllegalArgumentException.class,
                 () -> TSS.verifyTSS(
                         TSSTestConstants.LEDGER_ID,
                         concat(
@@ -287,7 +217,6 @@ public class TSSTest {
                                 TSSTestConstants.AGGREGATE_SCHNORR_SIGNATURE),
                         TSSTestConstants.MESSAGE));
 
-        // And finally check bad args
         assertThrows(
                 IllegalArgumentException.class,
                 () -> TSS.verifyTSS(

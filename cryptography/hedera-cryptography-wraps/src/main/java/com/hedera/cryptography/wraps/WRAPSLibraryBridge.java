@@ -4,6 +4,9 @@ package com.hedera.cryptography.wraps;
 import com.hedera.common.nativesupport.ResourceFile;
 import com.hedera.common.nativesupport.SingletonLoader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Set;
@@ -32,6 +35,26 @@ public class WRAPSLibraryBridge {
                 .addOpens(INSTANCE_HOLDER.getNativeLibraryPackageName(), SingletonLoader.class.getModule());
         WRAPSLibraryBridge.class.getModule().addOpens("com.hedera.cryptography.wraps", ResourceFile.class.getModule());
     }
+
+    /// A singleton used to initialize the CompressedVerifyingKey for Nova WRAPS.
+    private static class CompressedVerifyingKeyLoader {
+        private static final CompressedVerifyingKeyLoader INSTANCE = new CompressedVerifyingKeyLoader();
+        private static final String FILE_NAME = "compressed_verification_key.bin";
+
+        private final boolean loaded;
+
+        private CompressedVerifyingKeyLoader() {
+            try (InputStream resourceStream = ResourceFile.openInputStream(
+                    WRAPSLibraryBridge.class, "com/hedera/cryptography/wraps/" + FILE_NAME)) {
+                final byte[] bytes = resourceStream.readAllBytes();
+                this.loaded = bytes.length > 0 && WRAPSLibraryBridge.loadCompressedVerifyingKey(bytes);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+    }
+
+    private static native boolean loadCompressedVerifyingKey(byte[] bytes);
 
     /// A singleton used to initialize the Public Params for Nova WRAPS.
     private static class PublicParamsLoader {
@@ -71,11 +94,19 @@ public class WRAPSLibraryBridge {
     }
 
     /**
-     * Checks if proof construction and verification is potentially supported.
-     * @return true if `constructWrapsProof` and `verifyCompressedProof` are operational
+     * Checks if proof construction is potentially supported.
+     * @return true if `constructWrapsProof` is operational
      */
     public static boolean isProofSupported() {
         return PublicParamsLoader.INSTANCE.loaded;
+    }
+
+    /**
+     * Checks if proof verification is potentially supported.
+     * @return true if `verifyCompressedProof` are operational
+     */
+    public static boolean isVerificationSupported() {
+        return CompressedVerifyingKeyLoader.INSTANCE.loaded;
     }
 
     // ------------------------------------------------------------------------------------------------------
@@ -511,8 +542,8 @@ public class WRAPSLibraryBridge {
      * @return true if the decider successfully verifies the proof, false if not or if errors occur
      */
     public boolean verifyCompressedProof(byte[] compressedProof, byte[] ledgerId, byte[] tssVerificationKey) {
-        // Ensure the PublicParams are loaded first.
-        if (!isProofSupported()) {
+        // Ensure the CompressedVerifyingKey is loaded first.
+        if (!isVerificationSupported()) {
             return false;
         }
         if (ledgerId == null

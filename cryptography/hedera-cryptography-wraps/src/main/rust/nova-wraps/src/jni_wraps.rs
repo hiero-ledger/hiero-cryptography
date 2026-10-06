@@ -50,6 +50,25 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
     })).unwrap_or_else(|_| jboolean::from(false))
 }
 
+/// JNI for WRAPSLibraryBridge.loadCompressedVerifyingKey
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBridge_loadCompressedVerifyingKey(
+    env: JNIEnv,
+    _clz: JClass,
+    bytes_jarray: JByteArray,
+) -> jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let option_key = COMPRESSED_VERIFYING_KEY.get_or_init(|| {
+            match deserialize_from_jbyte_array(&env, &bytes_jarray) {
+                Ok(val) => Some(val),
+                Err(_) => None
+            }
+        });
+
+        jboolean::from(option_key.is_some())
+    })).unwrap_or_else(|_| jboolean::from(false))
+}
+
 /// JNI for WRAPSLibraryBridge.generateSchnorrKeysImpl
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBridge_generateSchnorrKeysImpl(
@@ -398,18 +417,10 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             Err(_) => return jboolean::from(false)
         };
 
-        let option_compressed_verifying_key = COMPRESSED_VERIFYING_KEY.get_or_init(|| {
-            let option_option_params = PUBLIC_PARAMS.get();
-            if option_option_params.is_none() || option_option_params.unwrap().is_none() {
-                return None;
-            }
-            let public_params = option_option_params.unwrap().as_ref().unwrap();
-
-            match WRAPS::setup_compressed_verifier(public_params) {
-                Ok(val) => Some(val),
-                Err(_) => None
-            }
-        });
+        let option_compressed_verifying_key = match COMPRESSED_VERIFYING_KEY.get() {
+            Some(val) => val,
+            None => return jboolean::from(false)
+        };
 
         let compressed_verifying_key = match option_compressed_verifying_key {
             Some(val) => val,

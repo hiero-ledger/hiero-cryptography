@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import com.hedera.cryptography.hints.AggregationAndVerificationKeys;
 import com.hedera.cryptography.hints.HintsLibraryBridge;
@@ -827,6 +828,12 @@ public class WRAPSLibraryBridgeTest {
     public void testConstructWrapsProof() {
         if (!WRAPSLibraryBridge.isProofSupported()) {
             // Gradle script will download artifacts and set TSS_LIB_WRAPS_ARTIFACTS_PATH to bypass this.
+            fail("Must have public parameters available.");
+            return;
+        }
+        if (!WRAPSLibraryBridge.isVerificationSupported()) {
+            // It's in the .jar file, so if it's missing, something is very wrong.
+            fail("Must have CompressedVerifyingKey available in .jar file.");
             return;
         }
 

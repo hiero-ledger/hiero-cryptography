@@ -19,10 +19,11 @@ import java.nio.file.attribute.PosixFilePermissions;
 public final class ResourceFile {
     private ResourceFile() {}
 
-    /// Creates a new temporary directory, extracts the file into it, and returns its Path.
-    /// The file must reside in a package that is open to the module of the ResourceFile class.
-    /// E.g. use clz.getModule().addOpens("package.name", ResourceFile.getModule()).
-    public static Path extract(final Class<?> clz, String filePathInJar, String filePosixPermissions) {
+    /// Checks if a resource is accessible and then returns an InputStream for it,
+    /// or throws an exception otherwise.
+    /// The caller is responsible for closing the stream, and the caller is encouraged to use
+    /// the try-with-resources pattern for this purpose.
+    public static InputStream openInputStream(final Class<?> clz, String filePathInJar) {
         final String packageName = packageNameOfResource(filePathInJar);
         if (!clz.getModule().isOpen(packageName, ResourceFile.class.getModule())) {
             // getResourceAsStream() will not throw an exception if the package is not opened, it will just return null
@@ -34,7 +35,18 @@ public final class ResourceFile {
                             ResourceFile.class.getModule().getName()));
         }
 
-        try (InputStream resourceStream = clz.getModule().getResourceAsStream(filePathInJar)) {
+        try {
+            return clz.getModule().getResourceAsStream(filePathInJar);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /// Creates a new temporary directory, extracts the file into it, and returns its Path.
+    /// The file must reside in a package that is open to the module of the ResourceFile class.
+    /// E.g. use clz.getModule().addOpens("package.name", ResourceFile.getModule()).
+    public static Path extract(final Class<?> clz, String filePathInJar, String filePosixPermissions) {
+        try (InputStream resourceStream = openInputStream(clz, filePathInJar)) {
             final String fileName = Path.of(filePathInJar).getFileName().toString();
 
             final Path tempDirectory = createTempDirectory(fileName);

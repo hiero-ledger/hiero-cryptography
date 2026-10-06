@@ -13,19 +13,9 @@ public final class TSS {
     private static final int HINTS_VERIFICATION_KEY_LENGTH = 1096;
     private static final int HINTS_SIGNATURE_LENGTH = HintsLibraryBridge.AGGREGATE_SIGNATURE_LENGTH_BYTES;
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH = 11368;
-    private static final int AGGREGATE_SCHNORR_SIGNATURE_LENGTH = 128;
 
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final WRAPSLibraryBridge WRAPS = WRAPSLibraryBridge.getInstance();
-
-    /** A mutable array of Schnorr public keys. */
-    private static byte[][] schnorrPublicKeys;
-
-    /** A mutable array of weights. */
-    private static long[] weights;
-
-    /** A mutable array of nodeIds. */
-    private static long[] nodeIds;
 
     private TSS() {}
 
@@ -34,8 +24,7 @@ public final class TSS {
      *
      * @param hintsVerificationKey `HintsLibraryBridge.preprocess().verificationKey()`
      * @param hintsSignature `HintsLibraryBridge.aggregateSignatures()`
-     * @param abProof either `WRAPSLibraryBridge.constructWrapsProof().compressed()`, or
-     *                `WRAPSLibraryBridge.runSigningProtocolPhase(SigningProtocolPhase.Aggregate)`
+     * @param abProof `WRAPSLibraryBridge.constructWrapsProof().compressed()`
      * @return the composite `tssSignature` array which is a simple concatenation of the input arrays in their
      *         respective order
      * @throws IllegalArgumentException if any of the arguments are malformed
@@ -50,11 +39,8 @@ public final class TSS {
         if (hintsSignature == null || hintsSignature.length != HINTS_SIGNATURE_LENGTH) {
             throw new IllegalArgumentException("`hintsSignature` must have a length of " + HINTS_SIGNATURE_LENGTH);
         }
-        if (abProof == null
-                || (abProof.length != COMPRESSED_WRAPS_PROOF_LENGTH
-                        && abProof.length != AGGREGATE_SCHNORR_SIGNATURE_LENGTH)) {
-            throw new IllegalArgumentException("`abProof` must have a length of " + COMPRESSED_WRAPS_PROOF_LENGTH
-                    + " or " + AGGREGATE_SCHNORR_SIGNATURE_LENGTH);
+        if (abProof == null || abProof.length != COMPRESSED_WRAPS_PROOF_LENGTH) {
+            throw new IllegalArgumentException("`abProof` must have a length of " + COMPRESSED_WRAPS_PROOF_LENGTH);
         }
 
         final byte[] array = Arrays.copyOf(
@@ -65,28 +51,10 @@ public final class TSS {
     }
 
     /**
-     * Sets the AddressBook which includes Schnorr public keys, weights, and nodeIds to the specified arrays.
-     * This method DOES NOT create a defensive copy of the data. Therefore, the client code is fully
-     * responsible for keeping the data immutable.
-     * Also, the client code is fully responsible for thread-safety of this method with respect to
-     * calling the `TSS.verifyTSS()` method that may use the AddressBook when a WRAPS proof hasn't been provided.
-     * Finally, the client code is fully responsible for the correctness of the data. In particular,
-     * the lengths of the all the arrays must be equal.
-     * @param schnorrPublicKeys the Schnorr public keys
-     * @param weights the weights
-     * @param nodeIds the nodeIds
-     */
-    public static void setAddressBook(byte[][] schnorrPublicKeys, long[] weights, long[] nodeIds) {
-        TSS.schnorrPublicKeys = schnorrPublicKeys;
-        TSS.weights = weights;
-        TSS.nodeIds = nodeIds;
-    }
-
-    /**
      * A convenience API to verify a `tssSignature` on a `message` with a given `ledgerId`.
      * <p>
      * The `ledgerId` identifies a specific network and is computed by the `WRAPSLibraryBridge.computeNetworkID()`
-     * using TSS genesis AddressBook and hinTS key hash.
+     * using TSS genesis AddressBook and its genesis hinTS verification key.
      * <p>
      * The `tssSignature` is a composite array which is a simple concatenation of a `hints_verification_key`,
      * `hints_signature`, and an AddressBook proof data. See `TSS.composeSignature()` above for details.
@@ -96,26 +64,16 @@ public final class TSS {
      * In Hiero networks, the `message` is likely a "block_root_hash".
      * <p>
      * The `ledgerId` is generally verified via the provided WRAPS compressed proof using a WRAPS verification key
-     * currently installed in the library. During a network genesis, the WRAPS proof may be unavailable for the first
-     * few blocks, in which case the WRAPS proof in the `tssSignature` is replaced with an `aggregate_schnorr_signature`
-     * that has a different length. When this is the case, this method will check if the `aggregate_schnorr_signature`
-     * is valid for the `ledgerId` as a message that was signed, using the Schnorr public keys set via a call to the
-     * `TSS.setSchnorrPublicKeys()` method. If the client didn't set any keys before calling `TSS.verifyTSS(), then
-     * this method will throw IllegalStateException. While it's okay not to set the keys if the client code is certain
-     * that only real WRAPS proofs will be used for verification, it is still STRONGLY recommended to set the Schnorr
-     * keys unconditionally just in case.
+     * currently installed in the library.
      * <p>
      * The `message` is verified against the provided `hints_signature` using the default threshold of strictly greater
      * than 1/2 of the network weight. See the three arguments version of the `HintsLibraryBridge.verifyAggregate()`
      * for details.
      *
      * @param ledgerId ledgerID as computed by `WRAPSLibraryBridge.computeNetworkID()` for genesis AB and hinTS key
-     * @param tssSignature hints_verification_key || hints_signature || [wraps_proof | aggregate_schnorr_signature]
+     * @param tssSignature hints_verification_key || hints_signature || compressed_wraps_proof
      * @param message a message
      * @return true if both the message and the ledgerId verify successfully with the respective signatures and proofs.
-     * @throws IllegalStateException if the `tssSignature` provides `aggregate_schnorr_signature` instead of
-     *                                  `wraps_proof`, but Schnorr public keys haven't been provided via a call to
-     *                                  `TSS.setSchnorrPublicKeys()` yet
      * @throws IllegalArgumentException if any of the arguments are malformed
      */
     public static boolean verifyTSS(final byte[] ledgerId, final byte[] tssSignature, final byte[] message)
@@ -125,18 +83,12 @@ public final class TSS {
             throw new IllegalArgumentException("`ledgerId` must be a 64 bytes array, instead got "
                     + (ledgerId == null ? null : (ledgerId.length + "")));
         }
-        if (tssSignature == null || tssSignature.length <= HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH) {
-            throw new IllegalArgumentException("`tssSignature` is too short. Expected more than "
-                    + (HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH)
+        if (tssSignature == null
+                || tssSignature.length
+                        != HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH + COMPRESSED_WRAPS_PROOF_LENGTH) {
+            throw new IllegalArgumentException("`tssSignature` has a wrong length. Expected "
+                    + (HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH + COMPRESSED_WRAPS_PROOF_LENGTH)
                     + " bytes, instead got " + (tssSignature == null ? null : (tssSignature.length + "")));
-        }
-        if ((tssSignature.length - HINTS_VERIFICATION_KEY_LENGTH - HINTS_SIGNATURE_LENGTH)
-                > Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH)) {
-            throw new IllegalArgumentException("`tssSignature` is too long. Expected no more than "
-                    + (HINTS_VERIFICATION_KEY_LENGTH
-                            + HINTS_SIGNATURE_LENGTH
-                            + Math.max(COMPRESSED_WRAPS_PROOF_LENGTH, AGGREGATE_SCHNORR_SIGNATURE_LENGTH))
-                    + " bytes, instead got " + tssSignature.length);
         }
         if (message == null || message.length == 0) {
             throw new IllegalArgumentException("`message` must be a non-empty array");
@@ -146,40 +98,8 @@ public final class TSS {
         final byte[] hintsVerificationKey = Arrays.copyOfRange(tssSignature, 0, HINTS_VERIFICATION_KEY_LENGTH);
         final byte[] abProof = Arrays.copyOfRange(
                 tssSignature, HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH, tssSignature.length);
-        if (abProof.length == COMPRESSED_WRAPS_PROOF_LENGTH) {
-            if (!WRAPS.verifyCompressedProof(abProof, ledgerId, hintsVerificationKey)) {
-                return false;
-            }
-        } else if (abProof.length == AGGREGATE_SCHNORR_SIGNATURE_LENGTH) {
-            if (TSS.schnorrPublicKeys == null) {
-                throw new IllegalStateException("Schnorr public keys haven't been provided");
-            }
-
-            // First, check if the ledgerId and the tssSignature refer to the same hinTS VK:
-            final byte[] tssSignatureHintsVKHash = WRAPS.hashArray(hintsVerificationKey);
-            final byte[] ledgerIdHintsVKHash = Arrays.copyOfRange(ledgerId, 32, 64);
-            if (!Arrays.equals(tssSignatureHintsVKHash, ledgerIdHintsVKHash)) {
-                return false;
-            }
-
-            // Then check if the AB set via setters in this class is the same as the ledgerId
-            final byte[] setABHash = WRAPS.hashAddressBook(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds);
-            final byte[] ledgerIdABHash = Arrays.copyOfRange(ledgerId, 0, 32);
-            if (!Arrays.equals(setABHash, ledgerIdABHash)) {
-                return false;
-            }
-
-            // Finally, we sign the ledgerId, so we verify using it as a message:
-            if (!WRAPS.verifySignature(TSS.schnorrPublicKeys, TSS.weights, TSS.nodeIds, ledgerId, abProof)) {
-                return false;
-            }
-        } else {
-            throw new IllegalArgumentException(
-                    "The AddressBook proof part of the `tssSignature` is neither a compressed WRAPS proof"
-                            + " with length "
-                            + COMPRESSED_WRAPS_PROOF_LENGTH + ", nor an aggregate Schnorr signature with length "
-                            + AGGREGATE_SCHNORR_SIGNATURE_LENGTH + ". Instead, its length is "
-                            + abProof.length);
+        if (!WRAPS.verifyCompressedProof(abProof, ledgerId, hintsVerificationKey)) {
+            return false;
         }
 
         // Finally check if the `message` verifies via hinTS:

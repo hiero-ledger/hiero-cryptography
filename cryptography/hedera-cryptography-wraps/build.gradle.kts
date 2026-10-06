@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import org.hiero.gradle.tasks.CargoBuildTask
+import org.hiero.cryptography.gradle.tasks.CargoBuildTask
 import org.hiero.gradle.tasks.GitClone
 
 plugins {
     id("org.hiero.gradle.module.library")
-    id("org.hiero.gradle.feature.rust")
+    id("org.hiero.cryptography.gradle.feature.rust")
     id("org.hiero.gradle.feature.test-multios")
     id("org.hiero.gradle.feature.benchmark")
-    id("DownloadWrapsArtifactTask")
+    id("org.hiero.cryptography.gradle.feature.download-wraps")
 }
 
 cargo {

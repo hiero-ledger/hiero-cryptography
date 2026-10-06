@@ -46,7 +46,7 @@ jobs:
       # Snyk will fail if the code does not compile and the error messages are less than helpful. Therefore, we will
       # compile the code first and then run Snyk so that we can get diagnostic information if the code does not compile.
       - name: Compile
-        run: ./gradlew assemble
+        run: ./gradlew -PpackageAllTargets=true assemble
 
       - name: Setup Snyk
         run: npm install -g snyk

@@ -95,11 +95,11 @@ jobs:
       # The inclusion of this step ensures the job fails cleanly without publishing to Maven Central if any of the
       # components fail to build.
       - name: Gradle Assemble
-        run: ./gradlew assemble
+        run: ./gradlew -PpackageAllTargets=true assemble
 
       # The steps below publish the artifacts to the Maven Central Nexus repository.
       - name: Gradle Publish to Maven Central
         env:
           NEXUS_USERNAME: ${{ secrets.CENTRAL_PUBLISHING_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.CENTRAL_PUBLISHING_PASSWORD }}
-        run: ./gradlew publishAggregationToCentralPortal -PpublishSigningEnabled=true
+        run: ./gradlew -PpackageAllTargets=true publishAggregationToCentralPortal -PpublishSigningEnabled=true

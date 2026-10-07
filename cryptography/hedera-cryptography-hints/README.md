@@ -6,8 +6,9 @@ Weighted threshold signatures with silent setup over BLS12-381, implementing
 
 ## Conventions
 
-- `n` is the domain size: a power of two greater than the number of parties, typically the
-  smallest such. The Java bridge accepts `n` up to 512.
+- `n` is the domain size: the number of parties plus one (for the reserved slot), rounded up
+  to the nearest power of two. So 31 parties give `n` = 32, and 32 parties give `n` = 64.
+  The Java bridge accepts `n` up to 512.
 - Party ids run from 0 to `n − 2`; the scheme reserves slot `n − 1`.
 - A hint is bound to its `(n, id)`; if either changes, the party computes a new one.
 - `verify` passes iff the signers' weight is strictly greater than `num/den` of the total.
@@ -70,7 +71,7 @@ everything else.
   `num`, `den`. The Java bridge enforces this; the Rust API does not.
 - **Uses fresh, secret seeds:** `keygen` and `contribute` are deterministic in their seeds.
   `SecretKey` is zeroized on drop; serialized key bytes held by the caller are not.
-- **Never uses one τ for two values of `n`** (below).
+- **Runs a fresh ceremony whenever `n` changes** (below).
 
 The aggregator and `ak` need not be trusted for unforgeability: `verify` depends only on
 `vk`. Producing a signature that verifies additionally requires the caller to:
@@ -86,12 +87,12 @@ The aggregator and `ak` need not be trusted for unforgeability: `verify` depends
 
 ## Network size and τ
 
-A τ must never serve two values of `n`, whatever the CRS's degree. So whenever a roster
-change moves `n` (the party count grows past a power of two, e.g. 31 → 32 parties takes `n`
-from 32 to 64, or shrinks back, e.g. 32 → 31 takes it from 64 to 32), run the ceremony again
-from `init` to obtain a fresh, independent τ. Every party then computes new hints against
-the new CRS, and `preprocess` runs again. Rosters with the same `n` may keep the CRS.
-`prune_crs` keeps τ, so it never yields a fresh CRS.
+Whenever a roster change moves `n`, in either direction, run the ceremony again from `init`.
+For example, 31 → 32 parties takes `n` from 32 to 64, and 32 → 31 takes it back to 32. The
+new run yields a CRS whose τ is independent of the old one. Every party then computes new
+hints against the new CRS, and `preprocess` runs again. Rosters with the same `n` may keep
+the CRS. Never carry a CRS over to a new `n`, whatever its degree: pruning or reusing it
+keeps the old τ.
 
 Why: a hint for size `n` publishes [sk·f(τ)]₁ for polynomials f up to degree n − 1 (e.g.
 sk·(L_i(τ) − L_i(0))). Unforgeability in a universe of size m rests on the degree check
@@ -100,5 +101,5 @@ a shared τ, an honest party's hint for a larger size violates this, and signatu
 smaller universe's `vk` become forgeable: the new universe when shrinking, the old one when
 growing (which matters as long as anything still accepts the old `vk`). §6.1 of the paper
 ("HintGen without size n and index i") notes this and the fix. The attack combines one key's
-hints for two sizes under one τ, so a fresh τ per size rules it out whether or not parties
-rotate their BLS keys.
+hints for two sizes under one τ, so a fresh ceremony per size rules it out whether or not
+parties rotate their BLS keys.

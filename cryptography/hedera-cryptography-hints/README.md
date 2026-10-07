@@ -18,12 +18,12 @@ Weighted threshold signatures with silent setup over BLS12-381, implementing
 A powers-of-tau ceremony ([ePrint 2022/1592](https://eprint.iacr.org/2022/1592)), run once
 per `n` (see *Network size and τ*).
 
-| Step | Who | Rust (`PowersOfTauProtocol::`) | Java (`HintsLibraryBridge`) |
-|---|---|---|---|
-| 1 | anyone | `init(d)`, with `d ≥ n` | `initCRS(d)` |
-| 2 | each contributor, in turn | `contribute(&prev, seed)` → `(next, proof)` | `updateCRS(prev, seed)` → `next ‖ proof` (proof = last 128 bytes) |
-| 3 | every node, every step | `verify_contribution(&prev, &next, &proof)` | `verifyCRS(prev, next, proof)` |
-| 4 | anyone, optional | `prune_crs(&crs, n)` | `pruneCRS(crs, n)` |
+| Step |            Who            |       Rust (`PowersOfTauProtocol::`)        |                    Java (`HintsLibraryBridge`)                    |
+|------|---------------------------|---------------------------------------------|-------------------------------------------------------------------|
+| 1    | anyone                    | `init(d)`, with `d ≥ n`                     | `initCRS(d)`                                                      |
+| 2    | each contributor, in turn | `contribute(&prev, seed)` → `(next, proof)` | `updateCRS(prev, seed)` → `next ‖ proof` (proof = last 128 bytes) |
+| 3    | every node, every step    | `verify_contribution(&prev, &next, &proof)` | `verifyCRS(prev, next, proof)`                                    |
+| 4    | anyone, optional          | `prune_crs(&crs, n)`                        | `pruneCRS(crs, n)`                                                |
 
 `init` is the CRS for τ = 1 and must not be used as is. The CRS to use is the last link of a
 chain that starts at `init(d)` and verifies at every step. Each contributor draws a fresh
@@ -33,16 +33,16 @@ chain that starts at `init(d)` and verifies at every step. Each contributor draw
 
 Steps 1–4 run once per roster, steps 5–8 once per message.
 
-| Step | Who | Rust (`HinTS::`) | Java (`HintsLibraryBridge`) |
-|---|---|---|---|
-| 1 | each party | `keygen(seed)` → `sk` | `generateSecretKey(seed)` |
-| 2 | each party `i` | `hint_gen(&crs, n, i, &sk)` → hint, published | `computeHints(crs, sk, i, n)` |
-| 3 | every node, per hint | `verify_hint(&crs, n, i, &hint)`; drop failures | `validateHintsKey(crs, hint, i, n)` |
-| 4 | every node | `preprocess(n, &crs, &signers)` → `(vk, ak)`; `signers` maps `i → (w_i, hint_i)` | `preprocess(crs, ids, hints, weights, n)` |
-| 5 | each signer | `sign(msg, &sk)` → `σ_i` | `signBls(msg, sk)` |
-| 6 | aggregator | `partial_verify(msg, &ak, i, &σ_i)` or `partial_verify_batch`; drop failures | `verifyBls` / `verifyBlsBatch` |
-| 7 | aggregator | `aggregate(&crs, &ak, &vk, &sigs)` → `π`; `sigs` maps `i → σ_i` | `aggregateSignatures(crs, ak, vk, ids, sigs)` |
-| 8 | verifier | `verify(msg, &vk, &π, (num, den))` | `verifyAggregate(π, msg, vk, num, den)`; the 3-arg form uses 1/2 |
+| Step |         Who          |                                 Rust (`HinTS::`)                                 |                   Java (`HintsLibraryBridge`)                    |
+|------|----------------------|----------------------------------------------------------------------------------|------------------------------------------------------------------|
+| 1    | each party           | `keygen(seed)` → `sk`                                                            | `generateSecretKey(seed)`                                        |
+| 2    | each party `i`       | `hint_gen(&crs, n, i, &sk)` → hint, published                                    | `computeHints(crs, sk, i, n)`                                    |
+| 3    | every node, per hint | `verify_hint(&crs, n, i, &hint)`; drop failures                                  | `validateHintsKey(crs, hint, i, n)`                              |
+| 4    | every node           | `preprocess(n, &crs, &signers)` → `(vk, ak)`; `signers` maps `i → (w_i, hint_i)` | `preprocess(crs, ids, hints, weights, n)`                        |
+| 5    | each signer          | `sign(msg, &sk)` → `σ_i`                                                         | `signBls(msg, sk)`                                               |
+| 6    | aggregator           | `partial_verify(msg, &ak, i, &σ_i)` or `partial_verify_batch`; drop failures     | `verifyBls` / `verifyBlsBatch`                                   |
+| 7    | aggregator           | `aggregate(&crs, &ak, &vk, &sigs)` → `π`; `sigs` maps `i → σ_i`                  | `aggregateSignatures(crs, ak, vk, ids, sigs)`                    |
+| 8    | verifier             | `verify(msg, &vk, &π, (num, den))`                                               | `verifyAggregate(π, msg, vk, num, den)`; the 3-arg form uses 1/2 |
 
 `preprocess` is deterministic, so nodes with the same inputs derive the same keys;
 `aggregate` is too, so one signer set yields one `π`. A verifier needs only `vk` (1096

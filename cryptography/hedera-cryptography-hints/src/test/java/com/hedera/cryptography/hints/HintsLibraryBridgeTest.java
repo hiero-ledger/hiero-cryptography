@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.hedera.cryptography.hints;
 
+import static com.hedera.cryptography.hints.HintsLibraryBridge.MAX_SIGNERS_NUM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -74,9 +76,10 @@ public class HintsLibraryBridgeTest {
         // ...or be smaller than the CRS size, but should still be a positive power of two
         assertNotNull(INSTANCE.computeHints(crs, secretKey, 0, 2));
 
-        // 0 <= partyId < n
+        // 0 <= partyId < n - 1; the last slot is reserved.
         assertNull(INSTANCE.computeHints(crs, secretKey, -1, 4));
         assertNull(INSTANCE.computeHints(crs, secretKey, Integer.MIN_VALUE, 4));
+        assertNull(INSTANCE.computeHints(crs, secretKey, 3, 4));
         assertNull(INSTANCE.computeHints(crs, secretKey, 4, 4));
         assertNull(INSTANCE.computeHints(crs, secretKey, Integer.MAX_VALUE, 4));
 
@@ -136,9 +139,10 @@ public class HintsLibraryBridgeTest {
         // n must match the CRS size
         assertFalse(INSTANCE.validateHintsKey(crs, hints, 2, 8));
 
-        // 0 <= partyId < n
+        // 0 <= partyId < n - 1; the last slot is reserved.
         assertFalse(INSTANCE.validateHintsKey(crs, hints, -1, 4));
         assertFalse(INSTANCE.validateHintsKey(crs, hints, Integer.MIN_VALUE, 4));
+        assertFalse(INSTANCE.validateHintsKey(crs, hints, 3, 4));
         assertFalse(INSTANCE.validateHintsKey(crs, hints, 4, 4));
         assertFalse(INSTANCE.validateHintsKey(crs, hints, Integer.MAX_VALUE, 4));
 
@@ -190,6 +194,46 @@ public class HintsLibraryBridgeTest {
     }
 
     @Test
+    void testMaximumUniverseSize() {
+        assertEquals(63, MAX_SIGNERS_NUM);
+        final int n = MAX_SIGNERS_NUM + 1;
+        final int partyId = n - 2;
+        final int reservedId = n - 1;
+        final byte[] crs = initAndUpdateCRS((short) n);
+        assertNotNull(crs);
+        final byte[] secretKey = INSTANCE.generateSecretKey(HintsConstants.RANDOM_2);
+        assertNotNull(secretKey);
+
+        // Exercise the last usable index without generating hints for all 63 parties.
+        final byte[] hints = INSTANCE.computeHints(crs, secretKey, partyId, n);
+        assertNotNull(hints);
+        assertTrue(INSTANCE.validateHintsKey(crs, hints, partyId, n));
+        assertNull(INSTANCE.computeHints(crs, secretKey, reservedId, n));
+        assertFalse(INSTANCE.validateHintsKey(crs, hints, reservedId, n));
+
+        final AggregationAndVerificationKeys keys =
+                INSTANCE.preprocess(crs, new int[] {partyId}, new byte[][] {hints}, new long[] {111}, n);
+        assertNotNull(keys);
+        assertNull(INSTANCE.preprocess(crs, new int[] {reservedId}, new byte[][] {hints}, new long[] {111}, n));
+
+        final byte[] signature = INSTANCE.signBls(HintsConstants.RANDOM_2, secretKey);
+        assertNotNull(signature);
+        assertTrue(INSTANCE.verifyBls(signature, HintsConstants.RANDOM_2, keys.aggregationKey(), partyId));
+        assertTrue(INSTANCE.verifyBlsBatch(
+                HintsConstants.RANDOM_2, keys.aggregationKey(), new int[] {partyId}, new byte[][] {signature}));
+        assertFalse(INSTANCE.verifyBls(signature, HintsConstants.RANDOM_2, keys.aggregationKey(), reservedId));
+        assertFalse(INSTANCE.verifyBlsBatch(
+                HintsConstants.RANDOM_2, keys.aggregationKey(), new int[] {reservedId}, new byte[][] {signature}));
+
+        final byte[] aggregateSignature = INSTANCE.aggregateSignatures(
+                crs, keys.aggregationKey(), keys.verificationKey(), new int[] {partyId}, new byte[][] {signature});
+        assertNotNull(aggregateSignature);
+        assertTrue(INSTANCE.verifyAggregate(aggregateSignature, HintsConstants.RANDOM_2, keys.verificationKey()));
+        assertNull(INSTANCE.aggregateSignatures(
+                crs, keys.aggregationKey(), keys.verificationKey(), new int[] {reservedId}, new byte[][] {signature}));
+    }
+
+    @Test
     void testPreprocessConstraints() {
         final byte[] crs = initAndUpdateCRS((short) 4);
 
@@ -201,9 +245,6 @@ public class HintsLibraryBridgeTest {
 
         final byte[] secretKey2 = INSTANCE.generateSecretKey(HintsConstants.RANDOM_2);
         final byte[] hints2 = INSTANCE.computeHints(crs, secretKey2, 2, 4);
-
-        final byte[] secretKey3 = INSTANCE.generateSecretKey(HintsConstants.RANDOM_3);
-        final byte[] hints3 = INSTANCE.computeHints(crs, secretKey3, 3, 4);
 
         // check n and crs length
         assertNull(INSTANCE.preprocess(
@@ -226,7 +267,7 @@ public class HintsLibraryBridgeTest {
         assertNull(INSTANCE.preprocess(
                 crs,
                 new int[] {0, 1, 2, 3},
-                new byte[][] {hints0, hints1, hints2, hints3},
+                new byte[][] {hints0, hints1, hints2, hints2},
                 new long[] {111, 1, 222, 999},
                 4));
         assertNull(INSTANCE.preprocess(
@@ -235,6 +276,8 @@ public class HintsLibraryBridgeTest {
                 crs, new int[] {0, 1, 2}, new byte[][] {hints0, hints1, hints2}, new long[] {111, 1}, 4));
 
         // sane values
+        assertNull(INSTANCE.preprocess(
+                crs, new int[] {0, 1, 3}, new byte[][] {hints0, hints1, hints2}, new long[] {111, 1, 222}, 4));
         assertNull(INSTANCE.preprocess(
                 crs, new int[] {0, 1, 4}, new byte[][] {hints0, hints1, hints2}, new long[] {111, 1, 222}, 4));
         assertNull(INSTANCE.preprocess(

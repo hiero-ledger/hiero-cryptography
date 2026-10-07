@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.hedera.cryptography.hints;
 
+import static com.hedera.cryptography.hints.HintsLibraryBridge.MAX_SIGNERS_NUM;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -49,8 +50,7 @@ public class HintsLibraryBridgeCRSTest {
         assertNull(INSTANCE.initCRS((short) -2));
         assertNull(INSTANCE.initCRS(Short.MIN_VALUE));
 
-        // Below relies on HintsLibraryBridge.MAX_SIGNERS_NUM = 1023:
-        assertNull(INSTANCE.initCRS((short) 1024));
+        assertNull(INSTANCE.initCRS((short) (MAX_SIGNERS_NUM + 2)));
     }
 
     @Test
@@ -58,6 +58,12 @@ public class HintsLibraryBridgeCRSTest {
         final byte[] origCRS = INSTANCE.initCRS((short) 4);
         final byte[] crs = INSTANCE.pruneCRS(origCRS, (short) 2);
         assertArrayEquals(CRSConstants.PRUNE_CRS_2, crs);
+
+        // A full universe needs one CRS slot beyond the maximum number of signers.
+        final short maxDegree = (short) (MAX_SIGNERS_NUM + 1);
+        final byte[] maxCRS = INSTANCE.initCRS(maxDegree);
+        assertNotNull(maxCRS);
+        assertArrayEquals(maxCRS, INSTANCE.pruneCRS(maxCRS, maxDegree));
     }
 
     @Test
@@ -70,12 +76,11 @@ public class HintsLibraryBridgeCRSTest {
         assertNull(INSTANCE.pruneCRS(crs, (short) -2));
         assertNull(INSTANCE.pruneCRS(crs, Short.MIN_VALUE));
 
-        // Below relies on HintsLibraryBridge.MAX_SIGNERS_NUM = 1023:
-        assertNull(INSTANCE.pruneCRS(crs, (short) 1024));
+        assertNull(INSTANCE.pruneCRS(crs, (short) (MAX_SIGNERS_NUM + 2)));
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 2, 11, 101, 1023})
+    @ValueSource(ints = {1, 2, 11, MAX_SIGNERS_NUM, MAX_SIGNERS_NUM + 1})
     void testInitCRSLength(final int n) {
         assertEquals(304 + n * 288, INSTANCE.initCRS((short) n).length);
     }

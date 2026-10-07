@@ -87,8 +87,8 @@ public class SignatureBench {
 
     @State(Scope.Thread)
     public static class HintsState {
-        // crsSizes larger than 256 take unreasonably long time to HINTS.preprocess().
-        @Param({"4", "8", "16", "32", "64", "128", "256"})
+        // Domain sizes include the reserved slot and support up to HintsLibraryBridge.MAX_SIGNERS_NUM signers.
+        @Param({"4", "8", "16", "32", "64"})
         short crsSize;
 
         /// false - do 3 signers, true - do (crsSize/2 + 1) signers

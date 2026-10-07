@@ -12,8 +12,8 @@ public class HintsLibraryBridge {
     private static final SingletonLoader<HintsLibraryBridge> INSTANCE_HOLDER =
             new SingletonLoader<>("hints", new HintsLibraryBridge());
 
-    /** The max number of signers that we can support w/o running into OutOfMemory as the memory usage is quadratic. */
-    private static final short MAX_SIGNERS_NUM = (short) 1023;
+    /** Maximum supported number of signers; hinTS reserves one additional domain slot. */
+    public static final short MAX_SIGNERS_NUM = 63;
 
     /** The max theoretical sum of weights all nodes together can have, which is 2^63-1 because we use signed long. */
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
@@ -57,17 +57,16 @@ public class HintsLibraryBridge {
      * Generates a new CRS object for the given number of signers plus 1.
      * <p>
      * The provided signersNum argument must be greater than the maximum number of nodes
-     * that the network supports by at least 1. For example, if the network supports up to 1023 nodes,
-     * then the signersNum argument must be equal to at least 1024. It's mathematically
-     * okay to have the singersNum much larger than the current number of nodes in the network,
-     * however, this will result in a larger space required to store the CRS.
+     * that the network supports by at least 1. For example, 63 nodes require a signersNum of 64.
+     * The argument may exceed the current number of nodes plus 1, up to {@link #MAX_SIGNERS_NUM} + 1,
+     * but a larger value requires more space to store the CRS.
      *
      * @param signersNum the number of signers plus 1
      * @return the CRS object
      */
     public byte[] initCRS(short signersNum) {
         // Support a degenerate case of 0 signers, or a normal case with more signers. Otherwise, error out.
-        if (signersNum < 1 || signersNum > MAX_SIGNERS_NUM) {
+        if (signersNum < 1 || signersNum > MAX_SIGNERS_NUM + 1) {
             return null;
         }
         return initCRSImpl(signersNum);
@@ -119,7 +118,7 @@ public class HintsLibraryBridge {
      */
     public byte[] pruneCRS(final byte[] prevCRS, final short signersNum) {
         // Support a degenerate case of 0 signers, or a normal case with more signers. Otherwise, error out.
-        if (prevCRS == null || signersNum < 1 || signersNum > MAX_SIGNERS_NUM) {
+        if (prevCRS == null || signersNum < 1 || signersNum > MAX_SIGNERS_NUM + 1) {
             return null;
         }
         return pruneCRSImpl(prevCRS, signersNum);
@@ -140,7 +139,7 @@ public class HintsLibraryBridge {
      * @param crs the CRS object
      * @param secretKey the secret key
      * @param partyId the party id
-     * @param n the number of parties
+     * @param n the power-of-two domain size, including the reserved final slot
      * @return the hints
      */
     public byte[] computeHints(final byte[] crs, final byte[] secretKey, int partyId, int n) {
@@ -192,7 +191,7 @@ public class HintsLibraryBridge {
      * @param parties the party ids for the indices in hintsPublicKeys and weights
      * @param hintsPublicKeys the valid hinTS keys by party id
      * @param weights the weights by party id
-     * @param n the number of parties
+     * @param n the power-of-two domain size, including the reserved final slot
      * @return the preprocessed keys
      */
     public AggregationAndVerificationKeys preprocess(
@@ -288,7 +287,7 @@ public class HintsLibraryBridge {
             return false;
         }
         for (int i = 0; i < parties.length; i++) {
-            if (!validatePartyId(parties[i], MAX_SIGNERS_NUM)) {
+            if (!validatePartyId(parties[i], MAX_SIGNERS_NUM + 1)) {
                 return false;
             }
         }
@@ -433,12 +432,15 @@ public class HintsLibraryBridge {
      */
     public native void resetCache();
 
-    // Returns true if the n is a positive power of two, and the crs isn't null and its length matches or is greater
-    // than the n.
+    // Returns true if n is a supported power-of-two domain size and the CRS has enough powers for it.
     private static boolean validateCRS(final byte[] crs, final int n) {
         // 304L, not 304: in int arithmetic n * 288 overflows, and for n of 2^27 through 2^30
         // it wraps to exactly 0, leaving the check as crs.length >= 304.
-        return n > 0 && (n & (n - 1)) == 0 && crs != null && crs.length >= (304L + (long) n * 288);
+        return n > 0
+                && n <= MAX_SIGNERS_NUM + 1
+                && (n & (n - 1)) == 0
+                && crs != null
+                && crs.length >= (304L + (long) n * 288);
     }
 
     private static int inferNFromCRSLength(final byte[] crs) {
@@ -448,9 +450,9 @@ public class HintsLibraryBridge {
         return (crs.length - 304) / 288;
     }
 
-    // Returns true if 0 <= partiyId < n && n <= MAX_SIGNERS_NUM.
+    // The final domain slot is reserved for hinTS, so valid signer IDs range from 0 through n - 2.
     private static boolean validatePartyId(final int partyId, final int n) {
-        return n <= MAX_SIGNERS_NUM && partyId >= 0 && partyId < n;
+        return n <= MAX_SIGNERS_NUM + 1 && partyId >= 0 && partyId < n - 1;
     }
 
     private static boolean validatePartialSignatures(final int[] parties, final byte[][] partialSignatures) {

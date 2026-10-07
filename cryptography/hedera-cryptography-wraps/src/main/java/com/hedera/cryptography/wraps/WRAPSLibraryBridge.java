@@ -114,7 +114,7 @@ public class WRAPSLibraryBridge {
     // ------------------------------------------------------------------------------------------------------
 
     /** The maximum size of an AddressBook. */
-    public static final int MAX_AB_SIZE = 64;
+    public static final int MAX_AB_SIZE = com.hedera.cryptography.hints.HintsLibraryBridge.MAX_SIGNERS_NUM;
 
     /** Size of a random seed. */
     public static final int ENTROPY_SIZE = 32;

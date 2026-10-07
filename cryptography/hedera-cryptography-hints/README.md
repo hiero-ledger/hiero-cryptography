@@ -8,7 +8,7 @@ Weighted threshold signatures with silent setup over BLS12-381, implementing
 
 - `n` is the domain size: the number of parties plus one (for the reserved slot), rounded up
   to the nearest power of two. So 31 parties give `n` = 32, and 32 parties give `n` = 64.
-  The Java bridge accepts `n` up to 512.
+  The Java bridge requires `n <= MAX_SIGNERS_NUM`.
 - Party ids run from 0 to `n − 2`; the scheme reserves slot `n − 1`.
 - A hint is bound to its `(n, id)`; if either changes, the party computes a new one.
 - `verify` passes iff the signers' weight is strictly greater than `num/den` of the total.

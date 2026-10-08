@@ -4,16 +4,18 @@ use ark_bls12_381::{g1::Config as G1Config, g2::Config as G2Config, Bls12_381};
 use ark_ec::hashing::{
     curve_maps::wb::WBMap, map_to_curve_hasher::MapToCurveBasedHasher, HashToCurve,
 };
-use ark_ec::pairing::{Pairing, PairingOutput};
+use ark_ec::pairing::Pairing;
+#[cfg(test)]
+use ark_ec::pairing::PairingOutput;
 use ark_ec::{
     short_weierstrass::{Affine, Projective},
-    AffineRepr, CurveGroup,
+    AffineRepr, CurveGroup, VariableBaseMSM,
 };
 use ark_ff::{field_hashers::{DefaultFieldHasher, HashToField}, Field};
 use ark_poly::{univariate::DensePolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::collections::HashMap;
-use ark_std::{ops::*, UniformRand};
+use ark_std::{ops::*, UniformRand, Zero};
 use sha2::Sha256;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use zeroize::Zeroize;
@@ -764,17 +766,13 @@ impl HinTS {
             )
         )?;
 
-        // the three challenges, drawn exactly as the aggregator drew them
-        let (χ_q, r, χ_op) = derive_challenges(vk, π)?;
+        // the challenges: χ_Q, r and χ_op exactly as the aggregator drew them, then ρ
+        let Challenges { χ_q, r, χ_op, rho } = derive_challenges(vk, π)?;
 
         check_or_return_false!(merged_relation_check(vk, π, ω, χ_q, r));
-        check_or_return_false!(opening_at_r_check(vk, π, r, χ_op));
-        check_or_return_false!(opening_at_r_div_ω_check(vk, π, r / ω));
 
-        // e([Q_x(τ)]_1, [τ]_2) appears in both remaining checks, so compute it once
-        let e_qx_tau = <Curve as Pairing>::pairing(&π.qx_of_tau_com, &vk.h_1);
-        check_or_return_false!(sumcheck_check(vk, π, &e_qx_tau));
-        check_or_return_false!(degree_check(vk, π, &e_qx_tau));
+        // the sumcheck, the degree check and both openings, as one product of four pairings
+        check_or_return_false!(batched_proof_check(vk, π, r, ω, χ_op, rho));
 
         Ok(true)
     }
@@ -785,6 +783,9 @@ impl HinTS {
 const DST_QUOTIENT_MERGE: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_V2_QUOTIENT_MERGE";
 const DST_EVALUATION_POINT: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_V2_EVALUATION_POINT";
 const DST_OPENING_BATCH: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_V2_OPENING_BATCH";
+/// domain separator for round 4, the verifier's pairing-batching challenge ρ (Sec 3.4.4 of the
+/// whitepaper); only the verifier draws it, so it adds nothing to the signature
+const DST_PAIRING_BATCH: &[u8] = b"HINTS_SIG_BLS12381:FIAT_SHAMIR_V2_PAIRING_BATCH";
 
 /// What the aggregator proves: the bitmap and running sums over the n slots, and the
 /// aggregate values computed from the signers' public material. `aggregate` assembles it
@@ -1020,6 +1021,7 @@ fn merge_scalars(values: &[F], χ: &F) -> F {
 }
 
 /// [a_0] + χ·[a_1] + χ^2·[a_2] + ..., by Horner's rule: `merge_polys` in the exponent
+#[cfg(test)]
 fn merge_points(points: &[G1AffinePoint], χ: &F) -> G1AffinePoint {
     points
         .iter()
@@ -1078,12 +1080,40 @@ fn absorb_round_3(
     transcript.absorb(q_mrg_of_r)
 }
 
-/// re-derives the challenges (χ_Q, r, χ_op) from a signature, making the same transcript
-/// calls in the same order as `prove`
+/// Round 4 of the transcript, drawn by the verifier alone: the two opening proofs, the only
+/// inputs of the batched pairing equations that rounds 1-3 have not absorbed, so ρ is drawn
+/// after every one of them is fixed. σ and the message enter only the separate BLS check and
+/// are left out, which keeps the batch independent of the message.
+fn absorb_round_4(
+    transcript: &mut Transcript,
+    opening_proof_r: &G1AffinePoint,
+    opening_proof_r_div_ω: &G1AffinePoint,
+) -> Result<(), HinTSError> {
+    transcript.absorb(opening_proof_r)?;
+    transcript.absorb(opening_proof_r_div_ω)
+}
+
+/// The Fiat-Shamir challenges a verifier derives from a signature.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Challenges {
+    /// merges the four quotient relations (round 1)
+    χ_q: F,
+    /// the evaluation point (round 2)
+    r: F,
+    /// batches the openings at r (round 3)
+    χ_op: F,
+    /// batches the four proof-system pairing equations (round 4, drawn by the verifier only);
+    /// named in ASCII because rustc's crate-wide `confusable_idents` lint flags ρ against the
+    /// file's `p` identifiers
+    rho: F,
+}
+
+/// re-derives the challenges from a signature: χ_Q, r and χ_op with the same transcript calls,
+/// in the same order, as `prove`, then the verifier's batching challenge ρ
 fn derive_challenges(
     vk: &VerificationKey,
     π: &ThresholdSignature,
-) -> Result<(F, F, F), HinTSError> {
+) -> Result<Challenges, HinTSError> {
     let mut transcript = Transcript::new();
     absorb_round_1(
         &mut transcript,
@@ -1111,11 +1141,31 @@ fn derive_challenges(
     )?;
     let χ_op: F = transcript.challenge(DST_OPENING_BATCH);
 
-    Ok((χ_q, r, χ_op))
+    absorb_round_4(&mut transcript, &π.opening_proof_r, &π.opening_proof_r_div_ω)?;
+    let rho: F = transcript.challenge(DST_PAIRING_BATCH);
+
+    Ok(Challenges { χ_q, r, χ_op, rho })
 }
 
-/// BLS: e(aPK, H(m)) = e([1]_1, σ)
+/// BLS: e(aPK, H(m)) = e([1]_1, σ), checked as the single product e(aPK, H(m)) · e(−[1]_1, σ) = 1;
+/// the same equation, with one final exponentiation instead of two. It stays outside the
+/// batched proof check, so the signature's unforgeability check is the standard one.
 fn bls_check(
+    msg: &[u8],
+    vk: &VerificationKey,
+    π: &ThresholdSignature,
+) -> Result<bool, HinTSError> {
+    let product = <Curve as Pairing>::multi_pairing(
+        [π.agg_pk, -vk.g_0],
+        [hash_to_g2(msg)?, π.agg_sig],
+    );
+    Ok(product.is_zero())
+}
+
+/// the BLS check as two separate pairings, as `verify` computed it before the batching; tests
+/// hold `bls_check` to it
+#[cfg(test)]
+fn bls_check_unbatched(
     msg: &[u8],
     vk: &VerificationKey,
     π: &ThresholdSignature,
@@ -1157,8 +1207,85 @@ fn merged_relation_check(
     merge_scalars(&[p1, p2, p3, p4], &χ_q) == π.q_mrg_of_r * vanishing_of_r
 }
 
+/// The sumcheck, the degree check and both KZG openings (E2-E5 of Sec 3.4.4 of the
+/// whitepaper), folded with weights 1, ρ, ρ², ρ³ into one product of four pairings grouped by
+/// their G2 argument:
+///   e(A_sk, [SK(τ)]_2) · e(A_z, [Z(τ)]_2) · e(A_τ, [τ]_2) · e(A_1, [1]_2) = 1.
+/// Here A_sk = [B(τ)]_1 and A_z = −[Q_z(τ)]_1 are the sumcheck's terms, which carry weight 1. Each
+/// opening's e(π, [τ − α]_2) is split as e(π, [τ]_2) · e(−α·π, [1]_2), so no G2 scalar
+/// multiplication is needed. If any of them fails, the product is 1 for at most 3 values of ρ,
+/// which round 4 draws after every input here is fixed.
+fn batched_proof_check(
+    vk: &VerificationKey,
+    π: &ThresholdSignature,
+    r: F,
+    ω: F,
+    χ_op: F,
+    rho: F,
+) -> bool {
+    // at ρ = 0 the product would test the sumcheck alone; probability 2^-255, so fail closed
+    if rho == F::from(0) {
+        return false;
+    }
+
+    let rho2 = rho * rho;
+    let rho3 = rho2 * rho;
+    let χ2 = χ_op * χ_op;
+    let χ3 = χ2 * χ_op;
+    let r_div_ω = r / ω;
+    // Q(r), merged as `prove` merged Q = Q_mrg + χ_op·PS + χ_op²·B + χ_op³·W
+    let q_of_r = merge_scalars(&[π.q_mrg_of_r, π.parsum_of_r, π.b_of_r, π.w_of_r], &χ_op);
+
+    // A_τ = (ρ − 1)·[Q_x] − ρ²·π_r − ρ³·π_{r/ω}
+    let a_τ = msm(
+        &[π.qx_of_tau_com, π.opening_proof_r, π.opening_proof_r_div_ω],
+        &[rho - F::from(1), -rho2, -rho3],
+    );
+
+    // A_1 = −aPK − ρ·[Q_x·τ] + ρ²·([Q] − Q(r)·g_0 + r·π_r)
+    //       + ρ³·([PS] − PS(r/ω)·g_0 + (r/ω)·π_{r/ω}),
+    // with [Q] = [Q_mrg] + χ_op·[PS] + χ_op²·[B] + χ_op³·[W] expanded into the one sum
+    let a_1 = msm(
+        &[
+            π.agg_pk,
+            π.qx_of_tau_mul_tau_com,
+            π.q_mrg_of_tau_com,
+            π.parsum_of_tau_com,
+            π.b_of_tau_com,
+            vk.w_of_tau_com,
+            vk.g_0,
+            π.opening_proof_r,
+            π.opening_proof_r_div_ω,
+        ],
+        &[
+            -F::from(1),
+            -rho,
+            rho2,
+            rho2 * χ_op + rho3,
+            rho2 * χ2,
+            rho2 * χ3,
+            -(rho2 * q_of_r + rho3 * π.parsum_of_r_div_ω),
+            rho2 * r,
+            rho3 * r_div_ω,
+        ],
+    );
+
+    <Curve as Pairing>::multi_pairing(
+        [π.b_of_tau_com, -π.qz_of_tau_com, a_τ, a_1],
+        [vk.sk_of_tau_com, vk.z_of_tau_com, vk.h_1, vk.h_0],
+    )
+    .is_zero()
+}
+
+/// Σ scalars[i]·points[i], as one multi-scalar multiplication
+fn msm<const N: usize>(points: &[G1AffinePoint; N], scalars: &[F; N]) -> G1AffinePoint {
+    G1ProjectivePoint::msm_unchecked(points, scalars).into_affine()
+}
+
 /// the single KZG opening at r of Q = Q_mrg + χ_op·PS + χ_op^2·B + χ_op^3·W; [Q(τ)]_1 is
-/// rebuilt from the commitments by homomorphism, with the verification key's own [W(τ)]_1
+/// rebuilt from the commitments by homomorphism, with the verification key's own [W(τ)]_1.
+/// Kept for tests, which use it to attribute a rejection to one equation; verify batches it.
+#[cfg(test)]
 fn opening_at_r_check(
     vk: &VerificationKey,
     π: &ThresholdSignature,
@@ -1173,7 +1300,9 @@ fn opening_at_r_check(
     verify_opening(vk, &q_of_tau_com, &r, &q_of_r, &π.opening_proof_r)
 }
 
-/// the KZG opening of ParSum at r / ω
+/// the KZG opening of ParSum at r / ω.
+/// Kept for tests, which use it to attribute a rejection to one equation; verify batches it.
+#[cfg(test)]
 fn opening_at_r_div_ω_check(
     vk: &VerificationKey,
     π: &ThresholdSignature,
@@ -1182,7 +1311,9 @@ fn opening_at_r_div_ω_check(
     verify_opening(vk, &π.parsum_of_tau_com, &r_div_ω, &π.parsum_of_r_div_ω, &π.opening_proof_r_div_ω)
 }
 
-/// the generalized sumcheck B(x) SK(x) = ask + Q_z(x) Z(x) + Q_x(x) x, in the exponent
+/// the generalized sumcheck B(x) SK(x) = ask + Q_z(x) Z(x) + Q_x(x) x, in the exponent.
+/// Kept for tests, which use it to attribute a rejection to one equation; verify batches it.
+#[cfg(test)]
 fn sumcheck_check(
     vk: &VerificationKey,
     π: &ThresholdSignature,
@@ -1194,7 +1325,9 @@ fn sumcheck_check(
     lhs == x1 + *e_qx_tau + x3
 }
 
-/// the degree check e([Q_x(τ)]_1, [τ]_2) = e([Q_x(τ)·τ]_1, [1]_2)
+/// the degree check e([Q_x(τ)]_1, [τ]_2) = e([Q_x(τ)·τ]_1, [1]_2).
+/// Kept for tests, which use it to attribute a rejection to one equation; verify batches it.
+#[cfg(test)]
 fn degree_check(
     vk: &VerificationKey,
     π: &ThresholdSignature,
@@ -1259,6 +1392,9 @@ fn proof_of_knowledge_random_oracle(
     Ok(hasher.hash_to_field::<1>(&serialized_data)[0])
 }
 
+/// the KZG check that π opens C to y at α: e(C − y·[1]_1, [1]_2) = e(π, [τ − α]_2).
+/// Kept for tests, which use it to attribute a rejection to one equation; verify batches it.
+#[cfg(test)]
 fn verify_opening(
     vp: &VerificationKey,
     commitment: &G1AffinePoint,
@@ -1668,8 +1804,8 @@ mod tests {
     }
 
     /// verify now rejects a degenerate n up front. Note this only pins the early rejection:
-    /// with a proof built for the honest key the openings check already returns false before
-    /// execution reaches the division by vk.n, so it is not a regression test for that panic.
+    /// without it, n = 0 still stops at the merged relation's Z(r) = 0 check (r^0 - 1 = 0),
+    /// before the division by vk.n, so it is not a regression test for that panic.
     #[test]
     fn test_verify_rejects_degenerate_n() {
         let universe_n = 32;
@@ -1723,8 +1859,9 @@ mod tests {
         assert_eq!(serialize(&π).unwrap().len(), 1248);
     }
 
-    /// The outcome of each of verify's checks, all of them evaluated, so tests can assert
-    /// which check rejects a signature.
+    /// The outcomes of BLS, the merged relation and, separately, each equation the batched
+    /// proof check folds together, all of them evaluated without stopping at the first failure:
+    /// what tests use to attribute a rejection to one check.
     #[derive(Debug, PartialEq)]
     struct CheckOutcomes {
         bls: bool,
@@ -1748,10 +1885,12 @@ mod tests {
         }
     }
 
-    /// runs every check verify makes after its guards, without stopping at the first failure
+    /// evaluates BLS, the merged relation and each equation the batched proof check folds
+    /// together, separately and without stopping at the first failure; tests use it to
+    /// attribute a rejection to one check
     fn run_all_checks(msg: &[u8], vk: &VerificationKey, π: &ThresholdSignature) -> CheckOutcomes {
         let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
-        let (χ_q, r, χ_op) = derive_challenges(vk, π).unwrap();
+        let Challenges { χ_q, r, χ_op, .. } = derive_challenges(vk, π).unwrap();
         let e_qx_tau = <Curve as Pairing>::pairing(&π.qx_of_tau_com, &vk.h_1);
         CheckOutcomes {
             bls: bls_check(msg, vk, π).unwrap(),
@@ -1868,6 +2007,11 @@ mod tests {
             run_all_checks(msg, vk, &π),
             CheckOutcomes { merged_relation: false, ..CheckOutcomes::all_pass() }
         );
+        assert_eq!(HinTS::verify(msg, vk, &π, threshold).unwrap(), verify_unbatched(msg, vk, &π, threshold));
+        // these witnesses satisfy every pairing equation, so the batch must accept them too
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let c = derive_challenges(vk, &π).unwrap();
+        assert!(batched_proof_check(vk, &π, c.r, ω, c.χ_op, c.rho));
         assert!(!HinTS::verify(msg, vk, &π, threshold).unwrap());
     }
 
@@ -2074,7 +2218,9 @@ mod tests {
 
     /// Each Fiat-Shamir round absorbs exactly its own items: changing one moves that round's
     /// challenge and every later one, and none earlier. In particular r depends on [Q_mrg],
-    /// which is what stops a prover from choosing the merged quotient after seeing r.
+    /// which is what stops a prover from choosing the merged quotient after seeing r, and the
+    /// verifier's batching challenge ρ depends on everything the batched equations read. σ
+    /// moves no challenge: it enters only the separate BLS check.
     #[test]
     fn test_transcript_rounds_bind_their_items() {
         let msg = b"transcript";
@@ -2082,27 +2228,29 @@ mod tests {
         let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
         let before = derive_challenges(&vk, &π).unwrap();
 
-        // the round that absorbs each field; 4 means no round does
+        // the round that absorbs each field; round 4 is the verifier's ρ, and 5 means no round
         let round_of = |field: &str| -> usize {
             match field {
                 "agg_pk" | "agg_weight" | "b_of_tau_com" | "parsum_of_tau_com"
                 | "qx_of_tau_com" | "qz_of_tau_com" | "qx_of_tau_mul_tau_com" => 1,
                 "q_mrg_of_tau_com" => 2,
                 "parsum_of_r" | "parsum_of_r_div_ω" | "w_of_r" | "b_of_r" | "q_mrg_of_r" => 3,
-                "agg_sig" | "opening_proof_r" | "opening_proof_r_div_ω" => 4,
+                "opening_proof_r" | "opening_proof_r_div_ω" => 4,
+                "agg_sig" => 5,
                 other => panic!("field {} is not classified", other),
             }
         };
         for (field, tampered) in tampered_copies(&π) {
             let after = derive_challenges(&vk, &tampered).unwrap();
             let round = round_of(field);
-            assert_eq!(before.0 != after.0, round <= 1, "{}: χ_Q", field);
-            assert_eq!(before.1 != after.1, round <= 2, "{}: r", field);
-            assert_eq!(before.2 != after.2, round <= 3, "{}: χ_op", field);
+            assert_eq!(before.χ_q != after.χ_q, round <= 1, "{}: χ_Q", field);
+            assert_eq!(before.r != after.r, round <= 2, "{}: r", field);
+            assert_eq!(before.χ_op != after.χ_op, round <= 3, "{}: χ_op", field);
+            assert_eq!(before.rho != after.rho, round <= 4, "{}: ρ", field);
         }
 
         // the whole verification key is part of round 1: changing any one of its 9 fields moves
-        // all three challenges. Each change keeps the key serializable: + 1 for the scalar, +
+        // all four challenges. Each change keeps the key serializable: + 1 for the scalar, +
         // the generator for points, and another valid domain size for n.
         let g1 = G1AffinePoint::generator();
         let g2 = G2AffinePoint::generator();
@@ -2131,10 +2279,42 @@ mod tests {
         for (field, other_vk) in other_vks {
             let after = derive_challenges(&other_vk, &π).unwrap();
             assert!(
-                before.0 != after.0 && before.1 != after.1 && before.2 != after.2,
+                before.χ_q != after.χ_q && before.r != after.r
+                    && before.χ_op != after.χ_op && before.rho != after.rho,
                 "vk.{} is not bound by round 1", field
             );
         }
+
+        // ρ is round 4: π_r, then π_{r/ω}, appended to rounds 1-3, under its own separator
+        let mut t = Transcript::new();
+        absorb_round_1(
+            &mut t,
+            &vk,
+            &π.agg_pk,
+            &π.agg_weight,
+            &π.b_of_tau_com,
+            &π.parsum_of_tau_com,
+            &π.qx_of_tau_com,
+            &π.qz_of_tau_com,
+            &π.qx_of_tau_mul_tau_com,
+        )
+        .unwrap();
+        absorb_round_2(&mut t, &π.q_mrg_of_tau_com).unwrap();
+        absorb_round_3(
+            &mut t,
+            &π.parsum_of_r,
+            &π.parsum_of_r_div_ω,
+            &π.w_of_r,
+            &π.b_of_r,
+            &π.q_mrg_of_r,
+        )
+        .unwrap();
+        t.absorb(&π.opening_proof_r).unwrap();
+        t.absorb(&π.opening_proof_r_div_ω).unwrap();
+        assert_eq!(
+            before.rho,
+            t.challenge::<F>(b"HINTS_SIG_BLS12381:FIAT_SHAMIR_V2_PAIRING_BATCH")
+        );
     }
 
     /// aggregate refuses inputs that cannot satisfy the relations, rather than emitting a
@@ -2201,6 +2381,7 @@ mod tests {
         assert!(denominator * π.agg_weight > numerator * vk.total_weight);
 
         assert_eq!(run_all_checks(msg, vk, &π), outcomes);
+        assert_eq!(HinTS::verify(msg, vk, &π, threshold).unwrap(), verify_unbatched(msg, vk, &π, threshold));
         assert!(!HinTS::verify(msg, vk, &π, threshold).unwrap());
     }
 
@@ -2253,12 +2434,381 @@ mod tests {
         let (crs, ak, vk, sks, _) = sample_universe(8);
         let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
         let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
-        let (χ_q, r, _χ_op) = derive_challenges(&vk, &π).unwrap();
+        let Challenges { χ_q, r, .. } = derive_challenges(&vk, &π).unwrap();
 
         // sanity: at its own r, the honest signature satisfies the merged relation
         assert!(merged_relation_check(&vk, &π, ω, χ_q, r));
 
         let ω_pow_n_minus_1 = ω.pow([(vk.n as u64) - 1]);
         assert!(!merged_relation_check(&vk, &π, ω, χ_q, ω_pow_n_minus_1));
+    }
+
+    /// bls_check computes the BLS equation as one product; it must agree with the two-pairing
+    /// form on an honest signature and whenever σ, aPK or the message is wrong
+    #[test]
+    fn test_bls_check_matches_two_pairing_form() {
+        let msg = b"bls";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+
+        let mut bad_sig = π.clone();
+        bad_sig.agg_sig = (bad_sig.agg_sig + G2AffinePoint::generator()).into_affine();
+        let mut bad_pk = π.clone();
+        bad_pk.agg_pk = (bad_pk.agg_pk + G1AffinePoint::generator()).into_affine();
+        let mut no_pk = π.clone();
+        no_pk.agg_pk = G1AffinePoint::zero();
+        let mut identity = no_pk.clone();
+        identity.agg_sig = G2AffinePoint::zero();
+
+        let agree = |m: &[u8], sig: &ThresholdSignature, expected: bool, label: &str| {
+            assert_eq!(bls_check(m, &vk, sig).unwrap(), expected, "{}: bls_check", label);
+            assert_eq!(
+                bls_check_unbatched(m, &vk, sig).unwrap(),
+                expected,
+                "{}: bls_check_unbatched", label
+            );
+        };
+        agree(msg, &π, true, "honest");
+        agree(msg, &bad_sig, false, "σ tampered");
+        agree(msg, &bad_pk, false, "aPK tampered");
+        agree(b"another message", &π, false, "another message");
+        agree(msg, &no_pk, false, "aPK = O");
+        // both BLS forms accept the all-identity pair, so verify's zero guards are what reject
+        // it: see test_identity_aggregates_from_cancelling_keys_are_rejected
+        agree(msg, &identity, true, "aPK = σ = O");
+    }
+
+    /// verify as it ran before the pairings were batched: the guards, the threshold, BLS as two
+    /// pairings, the merged relation and the four proof-system checks one by one. The batched
+    /// verify must agree with it, except with probability 3/|F|, the batching error.
+    fn verify_unbatched(
+        msg: &[u8],
+        vk: &VerificationKey,
+        π: &ThresholdSignature,
+        fraction: (F, F),
+    ) -> bool {
+        if !utils::is_n_valid(vk.n) || π.agg_pk.is_zero() || π.agg_sig.is_zero() {
+            return false;
+        }
+        let (numerator, denominator) = fraction;
+        if !(denominator * π.agg_weight > numerator * vk.total_weight) {
+            return false;
+        }
+        if !bls_check_unbatched(msg, vk, π).unwrap() {
+            return false;
+        }
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let Challenges { χ_q, r, χ_op, .. } = derive_challenges(vk, π).unwrap();
+        merged_relation_check(vk, π, ω, χ_q, r) && proof_checks_unbatched(vk, π, r, ω, χ_op)
+    }
+
+    /// the four proof-system checks one by one, which batched_proof_check must agree with
+    fn proof_checks_unbatched(
+        vk: &VerificationKey,
+        π: &ThresholdSignature,
+        r: F,
+        ω: F,
+        χ_op: F,
+    ) -> bool {
+        let e_qx_tau = <Curve as Pairing>::pairing(&π.qx_of_tau_com, &vk.h_1);
+        opening_at_r_check(vk, π, r, χ_op)
+            && opening_at_r_div_ω_check(vk, π, r / ω)
+            && sumcheck_check(vk, π, &e_qx_tau)
+            && degree_check(vk, π, &e_qx_tau)
+    }
+
+    /// The batched verify agrees with the unbatched one on a corpus of honest and tampered
+    /// inputs: n = 2, 4, 8 and 32, three participation patterns, all 16 single-field
+    /// tamperings, identity opening proofs, and a seeded random sample. The two may differ only
+    /// with probability 3/|F|. Since `verify` stops at BLS or the merged relation on most
+    /// tampered inputs, each input also holds the batched proof check to the four checks
+    /// directly, at its own challenges.
+    #[test]
+    fn test_batched_verify_matches_unbatched() {
+        let msg = b"batched";
+        let threshold = (F::from(0), F::from(1));
+        let agree = |vk: &VerificationKey, π: &ThresholdSignature, label: &str| -> bool {
+            let batched = HinTS::verify(msg, vk, π, threshold).unwrap();
+            assert_eq!(batched, verify_unbatched(msg, vk, π, threshold), "{}", label);
+            // at the input's own challenges, whether or not verify got as far as the batch
+            let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+            let c = derive_challenges(vk, π).unwrap();
+            assert_eq!(
+                batched_proof_check(vk, π, c.r, ω, c.χ_op, c.rho),
+                proof_checks_unbatched(vk, π, c.r, ω, c.χ_op),
+                "{} (proof checks)", label
+            );
+            batched
+        };
+
+        for n in [2usize, 4, 8, 32] {
+            let (crs, ak, vk, sks, _) = sample_universe(n);
+            let participations = [
+                ("everyone", sign_all(msg, &sks, 0..n - 1)),
+                ("a single signer", sign_all(msg, &sks, [0])),
+                ("every other party", sign_all(msg, &sks, (0..n - 1).step_by(2))),
+            ];
+            for (label, sigs) in participations.iter() {
+                let π = HinTS::aggregate(&crs, &ak, &vk, sigs).unwrap();
+                assert!(agree(&vk, &π, &format!("n = {}, {}", n, label)));
+                for (field, tampered) in tampered_copies(&π) {
+                    assert!(!agree(&vk, &tampered, &format!("n = {}, {}, {} tampered", n, label, field)));
+                }
+            }
+        }
+
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+
+        // identity opening proofs: MSM bases in the batch, identity pairs in the oracles
+        let mut zero_r = π.clone();
+        zero_r.opening_proof_r = G1AffinePoint::zero();
+        assert!(!agree(&vk, &zero_r, "π_r = O"));
+        let mut zero_r_div_ω = π.clone();
+        zero_r_div_ω.opening_proof_r_div_ω = G1AffinePoint::zero();
+        assert!(!agree(&vk, &zero_r_div_ω, "π_{r/ω} = O"));
+
+        // a seeded random sample of signer sets and single-field tamperings
+        let rng = &mut ark_std::test_rng();
+        for _ in 0..24 {
+            let signers: Vec<usize> = (0..7).filter(|_| rng.gen_bool(0.5)).collect();
+            if signers.is_empty() {
+                continue;
+            }
+            let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, signers)).unwrap();
+            assert!(agree(&vk, &π, "random signer set"));
+            let mut copies = tampered_copies(&π);
+            let (field, tampered) = copies.swap_remove(rng.gen_range(0..copies.len()));
+            assert!(!agree(&vk, &tampered, field));
+        }
+    }
+
+    /// Each of the five equations is load-bearing on its own. Tampering one opening proof
+    /// breaks only its own equation (π_r and π_{r/ω} feed only round 4, so χ_Q, r and χ_op stay
+    /// put), and the batched proof check must reject it. A tampered σ, which only BLS reads,
+    /// leaves the batch satisfied and is caught by bls_check. The sumcheck-only and
+    /// degree-only cases are the two `test_*_rejects_*` forgeries above.
+    #[test]
+    fn test_each_pairing_equation_is_load_bearing() {
+        let msg = b"load-bearing";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let threshold = (F::from(0), F::from(1));
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let bump = |p: G1AffinePoint| (p + G1AffinePoint::generator()).into_affine();
+
+        let mut bad_r = π.clone();
+        bad_r.opening_proof_r = bump(bad_r.opening_proof_r);
+        let mut bad_r_div_ω = π.clone();
+        bad_r_div_ω.opening_proof_r_div_ω = bump(bad_r_div_ω.opening_proof_r_div_ω);
+        let mut bad_sig = π.clone();
+        bad_sig.agg_sig = (bad_sig.agg_sig + G2AffinePoint::generator()).into_affine();
+
+        let cases = [
+            (bad_r, CheckOutcomes { opening_at_r: false, ..CheckOutcomes::all_pass() }, false),
+            (bad_r_div_ω, CheckOutcomes { opening_at_r_div_ω: false, ..CheckOutcomes::all_pass() }, false),
+            (bad_sig, CheckOutcomes { bls: false, ..CheckOutcomes::all_pass() }, true),
+        ];
+        for (tampered, outcomes, batch_accepts) in cases {
+            assert_eq!(run_all_checks(msg, &vk, &tampered), outcomes);
+            let c = derive_challenges(&vk, &tampered).unwrap();
+            assert_eq!(batched_proof_check(&vk, &tampered, c.r, ω, c.χ_op, c.rho), batch_accepts);
+            assert!(!HinTS::verify(msg, &vk, &tampered, threshold).unwrap());
+        }
+    }
+
+    /// The weights are load-bearing. Shifting [Q_x] by Δ breaks the sumcheck and the degree
+    /// check in opposite directions, by e(−Δ, [τ]_2) and e(Δ, [τ]_2); with weights 1 and ρ the
+    /// batch sees (ρ − 1)·Δ and rejects, while with ρ = 1 the two failures cancel and it would
+    /// accept. That is the attack the weighting prevents. r, χ_op and ρ are held fixed, so
+    /// only the two equations move.
+    #[test]
+    fn test_batch_weighting_is_load_bearing() {
+        let msg = b"weighting";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let c = derive_challenges(&vk, &π).unwrap();
+        assert!(batched_proof_check(&vk, &π, c.r, ω, c.χ_op, c.rho));
+
+        let mut shifted = π.clone();
+        shifted.qx_of_tau_com = (shifted.qx_of_tau_com + G1AffinePoint::generator()).into_affine();
+        let e_qx_tau = <Curve as Pairing>::pairing(&shifted.qx_of_tau_com, &vk.h_1);
+        assert!(!sumcheck_check(&vk, &shifted, &e_qx_tau));
+        assert!(!degree_check(&vk, &shifted, &e_qx_tau));
+
+        assert!(!batched_proof_check(&vk, &shifted, c.r, ω, c.χ_op, c.rho));
+        assert!(batched_proof_check(&vk, &shifted, c.r, ω, c.χ_op, F::from(1)));
+    }
+
+    /// at ρ = 0 the batch would test the sumcheck alone, so batched_proof_check fails closed
+    /// there, even for an honest signature
+    #[test]
+    fn test_batch_rejects_rho_zero() {
+        let msg = b"rho zero";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let c = derive_challenges(&vk, &π).unwrap();
+        assert!(batched_proof_check(&vk, &π, c.r, ω, c.χ_op, c.rho));
+        assert!(!batched_proof_check(&vk, &π, c.r, ω, c.χ_op, F::from(0)));
+    }
+
+    /// The message enters only the BLS check, including when it is empty: verify rejects a
+    /// signature under another message through bls_check, while the challenges, which take no
+    /// message, and the batched proof check stay satisfied
+    #[test]
+    fn test_message_enters_only_the_bls_check() {
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let threshold = (F::from(0), F::from(1));
+        for (msg, other) in [(&b"message"[..], &b""[..]), (&b""[..], &b"message"[..])] {
+            let case = format!(
+                "msg = {:?}, other = {:?}",
+                String::from_utf8_lossy(msg), String::from_utf8_lossy(other)
+            );
+            let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+            assert!(HinTS::verify(msg, &vk, &π, threshold).unwrap(), "{}", case);
+            assert!(!bls_check(other, &vk, &π).unwrap(), "{}", case);
+            assert!(!HinTS::verify(other, &vk, &π, threshold).unwrap(), "{}", case);
+            let c = derive_challenges(&vk, &π).unwrap();
+            assert!(batched_proof_check(&vk, &π, c.r, ω, c.χ_op, c.rho), "{}", case);
+        }
+    }
+
+    /// identity aggregates are rejected. These are #674's guards: here BLS rejects them too, or the
+    /// merged relation when both are the identity, so this pins the behaviour rather than the guard
+    /// alone. The test that isolates the guards is
+    /// test_identity_aggregates_from_cancelling_keys_are_rejected.
+    #[test]
+    fn test_identity_aggregates_are_rejected() {
+        let msg = b"identity";
+        let (crs, ak, vk, sks, _) = sample_universe(8);
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &sks, 0..7)).unwrap();
+        let threshold = (F::from(0), F::from(1));
+        assert!(HinTS::verify(msg, &vk, &π, threshold).unwrap());
+
+        let mut no_pk = π.clone();
+        no_pk.agg_pk = G1AffinePoint::zero();
+        let mut no_sig = π.clone();
+        no_sig.agg_sig = G2AffinePoint::zero();
+        let mut neither = no_pk.clone();
+        neither.agg_sig = G2AffinePoint::zero();
+        let cases = [("aPK = O", no_pk), ("σ = O", no_sig), ("aPK = σ = O", neither)];
+        for (label, tampered) in cases {
+            assert!(!HinTS::verify(msg, &vk, &tampered, threshold).unwrap(), "{}", label);
+        }
+    }
+
+    /// Two parties whose secret keys cancel, sk and −sk, each with a valid proof of possession,
+    /// aggregate to the identity: aPK = O and σ = O. The identity satisfies BLS for any message,
+    /// and the relations and the batched proof check hold too, so verify's zero guards are what
+    /// reject it.
+    #[test]
+    fn test_identity_aggregates_from_cancelling_keys_are_rejected() {
+        let n = 4; // the smallest domain with two parties besides the reserved slot
+        let msg = b"cancelling keys";
+        let other = b"another message";
+        let (crs, _ak, _vk, sks, epks) = sample_universe(n);
+
+        // party 0 keeps sample_universe's key sk, and party 1 holds −sk with its own proof of
+        // possession, built as preprocess builds an absent party's zero key
+        let neg_sk = SecretKey {
+            secret: -*sks[0],
+            pop: generate_proof_of_knowledge(&-*sks[0], [7u8; 32]).unwrap(),
+        };
+        let keys = vec![sks[0].clone(), neg_sk];
+        let weights = sample_weights(n - 1);
+        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> = [
+            (0, (weights[0], epks[0].clone())),
+            (1, (weights[1], HinTS::hint_gen(&crs, n, 1, &keys[1]).unwrap())),
+        ]
+        .into_iter()
+        .collect();
+        let (vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
+        let π = HinTS::aggregate(&crs, &ak, &vk, &sign_all(msg, &keys, [0, 1])).unwrap();
+
+        // the aggregate is the identity, which satisfies BLS for every message
+        assert_eq!(π.agg_pk, G1AffinePoint::zero());
+        assert_eq!(π.agg_sig, G2AffinePoint::zero());
+        assert!(bls_check(msg, &vk, &π).unwrap());
+        assert!(bls_check(other, &vk, &π).unwrap());
+
+        // at the signature's own challenges, the merged relation and the proof checks hold
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let c = derive_challenges(&vk, &π).unwrap();
+        assert!(merged_relation_check(&vk, &π, ω, c.χ_q, c.r));
+        assert!(batched_proof_check(&vk, &π, c.r, ω, c.χ_op, c.rho));
+        assert!(proof_checks_unbatched(&vk, &π, c.r, ω, c.χ_op));
+
+        // the two parties carry all the weight, so the claim clears a majority
+        let threshold = (F::from(1), F::from(2));
+        let (numerator, denominator) = threshold;
+        assert!(denominator * π.agg_weight > numerator * vk.total_weight);
+
+        // which leaves verify's zero guards to reject it
+        assert!(!HinTS::verify(msg, &vk, &π, threshold).unwrap());
+        assert!(!HinTS::verify(other, &vk, &π, threshold).unwrap());
+    }
+
+    /// The weight ρ must be unpredictable to the aggregator. Start from the sumcheck-only
+    /// forgery, where only the sumcheck fails, by e(−D, [1]_2) with D = aPK* − aPK. Shift π_r by
+    /// Δ and π_{r/ω} by −Δ/w, with Δ = D / (w²·r·(1 − ω⁻¹)). At weight w the openings' [τ]_2
+    /// terms cancel and their [1]_2 terms add D, so the batch accepts at that w: one partial
+    /// signature would verify for the whole network. ρ is drawn after both opening proofs, so
+    /// the forger cannot know it in advance, and verify rejects every such shift: one tuned to
+    /// the ρ of the unshifted signature, and ones tuned to χ_op, r, χ_Q and 1, the values a
+    /// careless verifier might reuse. The shift is tuned to the sumcheck's and the openings'
+    /// weights, 1, ρ² and ρ³, so the test also pins them: new weights need their own soundness
+    /// argument rather than a re-tuned shift.
+    #[test]
+    fn test_batch_weight_is_unpredictable() {
+        let n = 8;
+        let msg = b"predictable weight";
+        let (crs, ak, vk, sks, _) = sample_universe(n);
+        let n_inv = F::from(1) / F::from(n as u64);
+
+        // the forgery of test_sumcheck_rejects_claimed_signers_who_did_not_sign
+        let honest = assemble_witness(&ak, &sign_all(msg, &sks, 0..n - 1)).unwrap();
+        let mut witness = honest.clone();
+        let sigs = sign_all(msg, &sks, [0]);
+        witness.agg_pk = ak.pks[0].mul(n_inv).into_affine();
+        witness.agg_sig = sigs[&0].mul(n_inv).into_affine();
+        let (π, exact) = prove(&crs, &ak, &vk, &witness).unwrap();
+        assert!(exact);
+
+        let threshold = (F::from(1), F::from(2));
+        let (numerator, denominator) = threshold;
+        let ω: F = utils::nth_root_of_unity(vk.n).unwrap();
+        let c = derive_challenges(&vk, &π).unwrap();
+        let d = witness.agg_pk - honest.agg_pk;
+        let weights = [
+            ("the ρ of the unshifted signature", c.rho),
+            ("χ_op", c.χ_op),
+            ("r", c.r),
+            ("χ_Q", c.χ_q),
+            ("1", F::from(1)),
+        ];
+        for (label, w) in weights {
+            let shift_r = d * (w * w * c.r * (F::from(1) - ω.inverse().unwrap())).inverse().unwrap();
+            let shift_r_div_ω = shift_r * -w.inverse().unwrap();
+            let mut forged = π.clone();
+            forged.opening_proof_r = (shift_r + forged.opening_proof_r).into_affine();
+            forged.opening_proof_r_div_ω = (shift_r_div_ω + forged.opening_proof_r_div_ω).into_affine();
+
+            // only round 4 moved, so χ_Q, r and χ_op are the unshifted signature's, and BLS
+            // and the merged relation still hold
+            let moved = derive_challenges(&vk, &forged).unwrap();
+            assert_eq!((moved.χ_q, moved.r, moved.χ_op), (c.χ_q, c.r, c.χ_op), "{}", label);
+            assert!(bls_check(msg, &vk, &forged).unwrap(), "{}", label);
+            assert!(merged_relation_check(&vk, &forged, ω, c.χ_q, c.r), "{}", label);
+            // the claim clears the threshold, or verify would reject it for that alone
+            assert!(denominator * forged.agg_weight > numerator * vk.total_weight, "{}", label);
+
+            // at the weight it was tuned to, the batch accepts the forgery
+            assert!(batched_proof_check(&vk, &forged, c.r, ω, c.χ_op, w), "{}", label);
+            // but verify draws ρ after the openings, and rejects it
+            assert!(!HinTS::verify(msg, &vk, &forged, threshold).unwrap(), "{}", label);
+        }
     }
 }

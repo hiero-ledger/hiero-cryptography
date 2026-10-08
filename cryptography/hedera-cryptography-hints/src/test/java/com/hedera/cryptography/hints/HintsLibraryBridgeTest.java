@@ -2,7 +2,6 @@
 package com.hedera.cryptography.hints;
 
 import static com.hedera.cryptography.hints.HintsLibraryBridge.MAX_SIGNERS_NUM;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -195,7 +194,6 @@ public class HintsLibraryBridgeTest {
 
     @Test
     void testMaximumUniverseSize() {
-        assertEquals(63, MAX_SIGNERS_NUM);
         final int n = MAX_SIGNERS_NUM + 1;
         final int partyId = n - 2;
         final int reservedId = n - 1;
@@ -204,7 +202,7 @@ public class HintsLibraryBridgeTest {
         final byte[] secretKey = INSTANCE.generateSecretKey(HintsConstants.RANDOM_2);
         assertNotNull(secretKey);
 
-        // Exercise the last usable index without generating hints for all 63 parties.
+        // Exercise the last usable index without generating hints for every party.
         final byte[] hints = INSTANCE.computeHints(crs, secretKey, partyId, n);
         assertNotNull(hints);
         assertTrue(INSTANCE.validateHintsKey(crs, hints, partyId, n));

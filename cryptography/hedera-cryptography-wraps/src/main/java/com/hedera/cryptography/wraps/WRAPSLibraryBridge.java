@@ -4,9 +4,8 @@ package com.hedera.cryptography.wraps;
 import com.hedera.common.nativesupport.ResourceFile;
 import com.hedera.common.nativesupport.SingletonLoader;
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
+import java.lang.System.Logger;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Set;
@@ -15,6 +14,8 @@ import java.util.Set;
  * A JNI bridge for the WRAPS 2.0 library APIs that allow participants to generate and verify recursive proofs for AddressBooks.
  */
 public class WRAPSLibraryBridge {
+    private static final Logger LOG = System.getLogger(WRAPSLibraryBridge.class.getName());
+
     /** Instance Holder for lazy loading and concurrency handling */
     private static final SingletonLoader<WRAPSLibraryBridge> INSTANCE_HOLDER =
             new SingletonLoader<>("wraps", new WRAPSLibraryBridge());
@@ -44,13 +45,37 @@ public class WRAPSLibraryBridge {
         private final boolean loaded;
 
         private CompressedVerifyingKeyLoader() {
+            boolean loaded = false;
             try (InputStream resourceStream = ResourceFile.openInputStream(
                     WRAPSLibraryBridge.class, "com/hedera/cryptography/wraps/" + FILE_NAME)) {
-                final byte[] bytes = resourceStream.readAllBytes();
-                this.loaded = bytes.length > 0 && WRAPSLibraryBridge.loadCompressedVerifyingKey(bytes);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                if (resourceStream == null) {
+                    LOG.log(
+                            Logger.Level.WARNING,
+                            FILE_NAME + " is missing from JAR:",
+                            new RuntimeException("capture stack trace"));
+                } else {
+                    final byte[] bytes = resourceStream.readAllBytes();
+                    if (bytes.length == 0) {
+                        LOG.log(
+                                Logger.Level.WARNING,
+                                FILE_NAME + " is empty in JAR:",
+                                new RuntimeException("capture stack trace"));
+                    } else {
+                        loaded = WRAPSLibraryBridge.loadCompressedVerifyingKey(bytes);
+                        if (!loaded) {
+                            LOG.log(
+                                    Logger.Level.WARNING,
+                                    FILE_NAME + " may be present in JAR, but failed to extract or parse:",
+                                    new RuntimeException("capture stack trace"));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Catch all exceptions because we want to fail gracefully.
+                LOG.log(Logger.Level.WARNING, "Error loading " + FILE_NAME + " from JAR:", e);
             }
+
+            this.loaded = loaded;
         }
     }
 
@@ -64,17 +89,32 @@ public class WRAPSLibraryBridge {
         private final boolean loaded;
 
         private PublicParamsLoader() {
-            final Path path = ResourceFile.extract(
-                            WRAPSLibraryBridge.class, "com/hedera/cryptography/wraps/" + FILE_NAME, "r--------")
-                    // Translate the file path to a path to its parent directory:
-                    .toAbsolutePath()
-                    .getParent();
+            boolean loaded = false;
+            try {
+                final Path path = ResourceFile.extract(
+                                WRAPSLibraryBridge.class, "com/hedera/cryptography/wraps/" + FILE_NAME, "r--------")
+                        // Translate the file path to a path to its parent directory:
+                        .toAbsolutePath()
+                        .getParent();
 
-            File dir = path.toFile();
-            this.loaded = dir.exists()
-                    && dir.isDirectory()
-                    && Set.of(dir.list()).contains(FILE_NAME)
-                    && WRAPSLibraryBridge.loadPublicParams(path.toString());
+                File dir = path.toFile();
+                loaded = dir.exists()
+                        && dir.isDirectory()
+                        && Set.of(dir.list()).contains(FILE_NAME)
+                        && WRAPSLibraryBridge.loadPublicParams(path.toString());
+
+                if (!loaded) {
+                    LOG.log(
+                            Logger.Level.WARNING,
+                            FILE_NAME + " may be present in JAR, but failed to extract or parse:",
+                            new RuntimeException("capture stack trace"));
+                }
+            } catch (Exception e) {
+                // Catch all exceptions because we want to fail gracefully.
+                LOG.log(Logger.Level.WARNING, "Error loading " + FILE_NAME + " from JAR:", e);
+            }
+
+            this.loaded = loaded;
         }
     }
 

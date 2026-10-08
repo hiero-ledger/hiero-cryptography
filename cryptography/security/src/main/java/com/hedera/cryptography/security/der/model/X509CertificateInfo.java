@@ -21,8 +21,14 @@ public record X509CertificateInfo(
         // Certificate and signing details
         BigInteger serialNumber,
         Interval validityInterval,
-        SignatureAlgorithm signatureAlgorithm)
+        SignatureAlgorithm signatureAlgorithm,
+
+        // Optional extensions, may be null.
+        Extensions extensions)
         implements DerEncoder {
+
+    /// A tag for certificate extensions as per the DER standard.
+    private static final byte EXTENSIONS_TAG = DerWriter.createTag(DerWriter.TAG_CONTEXT, true, (byte) 3);
 
     /// Certificate version v3. Values are zero-based, so v3 is 2.
     private static final byte VERSION_3 = 2;
@@ -54,6 +60,8 @@ public record X509CertificateInfo(
         os.writeBytes(publicKey().getEncoded());
         // Skip issuerUniqueId as not supported.
         // Skip subjectUniqueId as not supported.
-        // Skip extensions as not supported.
+        if (extensions != null) {
+            DerEncoder.wrap(EXTENSIONS_TAG, extensions).encode(os);
+        }
     }
 }

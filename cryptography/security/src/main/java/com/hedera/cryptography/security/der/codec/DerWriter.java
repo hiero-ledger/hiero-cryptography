@@ -9,8 +9,10 @@ import java.time.format.DateTimeFormatter;
 
 /// Utility class to write DER-encoded values.
 public class DerWriter {
+    public static final byte TAG_BOOLEAN = 0x01;
     public static final byte TAG_INTEGER = 0x02;
     public static final byte TAG_BIT_STRING = 0x03;
+    public static final byte TAG_OCTET_STRING = 0x04;
     public static final byte TAG_NULL = 0x05;
     public static final byte TAG_OBJECT_ID = 0x06;
     public static final byte TAG_UTF_8_STRING = 0x0C;
@@ -19,7 +21,20 @@ public class DerWriter {
     public static final byte TAG_GENERALIZED_TIME = 0x18;
     public static final byte TAG_SEQUENCE = 0x30;
     public static final byte TAG_SET = 0x31;
+    public static final byte TAG_CONTEXT = (byte) 0x80;
     public static final byte TAG_TBS_CERTIFICATE = (byte) 0xa0;
+
+    /// Create a custom tag.
+    public static byte createTag(byte tagClass, boolean form, byte val) {
+        if (val < 0 || val > 30) {
+            throw new IllegalArgumentException("val must be between 0 and 30.");
+        }
+        byte tag = (byte) (tagClass | val);
+        if (form) {
+            tag |= (byte) 0x20;
+        }
+        return tag;
+    }
 
     /// Write a (sometimes) length-prefixed varint number.
     public static void putLength(DerOutputStream os, int len) {
@@ -106,5 +121,12 @@ public class DerWriter {
         // The final octet has no padding because we use entire bytes, so put zero:
         os.write(0);
         os.writeBytes(bits);
+    }
+
+    /// Write a DER boolean.
+    public static void putBoolean(DerOutputStream os, boolean b) {
+        os.write(TAG_BOOLEAN);
+        putLength(os, 1);
+        os.write(b ? 0xFF : 0);
     }
 }

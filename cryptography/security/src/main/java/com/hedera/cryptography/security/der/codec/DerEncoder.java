@@ -32,4 +32,21 @@ public interface DerEncoder {
 
     /// Emit the model content alone w/o the outer TAG_SEQUENCE.
     void emit(DerOutputStream os);
+
+    /// A helper factory for DerEncoders that need to be wrapped inside a tag.
+    /// Produces an encoding of `<tag><length><encoder.encode()>`.
+    static DerEncoder wrap(byte tag, DerEncoder encoder) {
+        return new DerEncoder() {
+
+            @Override
+            public void encode(DerOutputStream os) {
+                encode(os, tag);
+            }
+
+            @Override
+            public void emit(DerOutputStream os) {
+                encoder.encode(os);
+            }
+        };
+    }
 }

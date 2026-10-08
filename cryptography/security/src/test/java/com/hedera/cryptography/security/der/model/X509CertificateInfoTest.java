@@ -57,7 +57,8 @@ public class X509CertificateInfoTest {
                 issuer,
                 BigInteger.valueOf(SERIAL_NUMBER),
                 new Interval(from, to),
-                new SignatureAlgorithm(ALGORITHM));
+                new SignatureAlgorithm(ALGORITHM),
+                null);
         cert.encode(os);
         byte[] array = os.toByteArray();
 

@@ -8,7 +8,7 @@ repositories {
 
 dependencies {
     implementation("org.hiero.gradle:hiero-gradle-conventions:0.7.12")
-    implementation("com.diffplug.spotless:spotless-plugin-gradle:8.10.2")
+    implementation("com.diffplug.spotless:spotless-plugin-gradle:8.10.3")
 }
 
 gradlePlugin.plugins.register("cryptographyBuildPlugin") {

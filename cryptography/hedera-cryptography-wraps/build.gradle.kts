@@ -53,3 +53,36 @@ tasks.test {
         )
     )
 }
+
+// add a feature variant that excludes '*.ptau' files
+val verifierSourceSet = sourceSets.create("verifier")
+
+java.registerFeature(verifierSourceSet.name) {
+    val variantArtifactName = "${project.name}-${verifierSourceSet.name}"
+    usingSourceSet(verifierSourceSet)
+    // the 'verifier' variant has the 'main' capability as both are mutually exclusive:
+    capability(project.group.toString(), project.name, project.version.toString())
+    // the 'verifier' variant can be selected through its own 'capability':
+    capability(project.group.toString(), variantArtifactName, project.version.toString())
+}
+
+val verifierJarTask = tasks.named<Jar>(verifierSourceSet.jarTaskName)
+
+verifierJarTask {
+    from(sourceSets.main.get().output) // same code as 'main' variant...
+    exclude("**/*.ptau") // ...but with large 'ptau' file excluded
+    manifest {
+        attributes["Implementation-Title"] = project.name
+        attributes["Implementation-Version"] = project.version
+    }
+}
+
+configurations {
+    // the additional variant has the same dependencies as the 'main' variant
+    named(verifierSourceSet.apiElementsConfigurationName) { extendsFrom(apiElements.get()) }
+    named(verifierSourceSet.runtimeElementsConfigurationName) { extendsFrom(runtimeElements.get()) }
+}
+
+tasks.assemble {
+    dependsOn(verifierJarTask)
+}

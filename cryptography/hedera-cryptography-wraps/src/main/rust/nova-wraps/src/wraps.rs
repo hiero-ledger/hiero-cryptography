@@ -865,12 +865,13 @@ impl WRAPS {
     ledger_id: impl AsRef<[u8]>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
-    let [ab_genesis_hash, _] = decode_rotation_message(ledger_id.as_ref())?;
+    let [ab_genesis_hash, genesis_hints_vk_hash] = decode_rotation_message(ledger_id.as_ref())?;
     let running = decode::<UncompressedWrapsProof>(running_proof)?;
 
     if running.z0.len() != 2
       || running.zi.len() != 2
       || running.z0[0] != ab_genesis_hash
+      || running.z0[1] != genesis_hints_vk_hash
       || running.zi[1] != Self::compute_hints_vk_hash(hints_vk)
     {
       return Ok(false);
@@ -898,14 +899,14 @@ impl WRAPS {
     ledger_id: impl AsRef<[u8]>,
     hints_vk: impl AsRef<[u8]>,
   ) -> Result<bool, WrapsError> {
-    let [ab_genesis_hash, _] = decode_rotation_message(ledger_id.as_ref())?;
+    let [ab_genesis_hash, genesis_hints_vk_hash] = decode_rotation_message(ledger_id.as_ref())?;
     let proof = decode::<CompressedWrapsProof>(proof_serialized)?;
 
     if proof.z0.len() != 2 || proof.zi.len() != 2 {
       return Ok(false);
     }
     // The chain starts at the genesis book, and currently carries the expected hints key.
-    let genesis_ok = proof.z0[0] == ab_genesis_hash;
+    let genesis_ok = proof.z0[0] == ab_genesis_hash && proof.z0[1] == genesis_hints_vk_hash;
     let hints_ok = proof.zi[1] == Self::compute_hints_vk_hash(hints_vk);
 
     // Nova returns the final state authenticated by the SNARK. It must agree with

@@ -2271,15 +2271,15 @@ fn wraps_simulation() {
         );
       }
 
-      // Verification uses only the ledger's address-book hash; current hints are separate.
+      // Verification also binds the ledger's genesis hints hash, not just its address-book hash.
       let mut other_genesis_hints: RotationMessage<E2> = decode(&ledger_id).unwrap();
       other_genesis_hints[1] += Base::ONE;
       let other_ledger_id = encode(&other_genesis_hints).unwrap();
-      assert!(WRAPS::verify_compressed_wraps_proof(
+      assert!(!WRAPS::verify_compressed_wraps_proof(
         wraps_vk, &compressed, &other_ledger_id, hints_vk,
       )
       .unwrap());
-      assert!(WRAPS::verify_uncompressed_wraps_proof(
+      assert!(!WRAPS::verify_uncompressed_wraps_proof(
         wraps_pp, &uncompressed, &other_ledger_id, hints_vk,
       )
       .unwrap());

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.hedera.cryptography.security.der.model;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import com.hedera.cryptography.security.TestUtils;
 import com.hedera.cryptography.security.der.codec.DerOutputStream;
 import com.hedera.cryptography.security.der.codec.DerWriter;
 import org.bouncycastle.asn1.DERPrintableString;
 import org.bouncycastle.asn1.DERUTF8String;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -30,5 +33,15 @@ public class DerStringTest {
         final DERPrintableString bcString = new DERPrintableString(str);
 
         TestUtils.assertArrayEquals(bcString.getEncoded(), os.toByteArray());
+    }
+
+    @Test
+    void testBadTag() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> new DerString("", (byte) 1));
+    }
+
+    @Test
+    void testBadPrintableString() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> new DerString("@", DerWriter.TAG_PRINTABLE_STRING));
     }
 }

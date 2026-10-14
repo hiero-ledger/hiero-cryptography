@@ -629,6 +629,11 @@ impl HinTS {
             );
         }
 
+        // an identity key or signature satisfies the pairing equation trivially, and preprocess
+        // gives every slot without a registered hint the identity key
+        check_or_return_false!(!ak.pks[party_id].is_zero());
+        check_or_return_false!(!sig.is_zero());
+
         let lhs = <Curve as Pairing>::pairing(ak.pks[party_id], hash_to_g2(msg)?);
         let rhs = <Curve as Pairing>::pairing(G1AffinePoint::generator(), sig);
         Ok(lhs == rhs)
@@ -675,6 +680,11 @@ impl HinTS {
                 "One or more signer_ids are out of range".to_string(),
             ));
         }
+
+        // as in partial_verify, but per signer: an identity pair leaves both sums below
+        // unchanged, so checking only the sums would let it pass alongside honest signers
+        check_or_return_false!(signer_ids.as_ref().iter().all(|&id| !ak.pks[id].is_zero()));
+        check_or_return_false!(signatures.as_ref().iter().all(|sig| !sig.is_zero()));
 
         // compute aggregate public key of all signers
         let apk = add::<G1AffinePoint>(signer_ids.as_ref().iter().map(|&x| ak.pks[x]));
@@ -1626,6 +1636,43 @@ mod tests {
         let no_ids: [usize; 0] = [];
         let no_sigs: [PartialSignature; 0] = [];
         assert!(HinTS::partial_verify_batch(msg, &ak, no_ids, no_sigs).is_err());
+    }
+
+    /// partial_verify rejects signatures that don't verify under the party's key. A slot with
+    /// no registered hint holds the identity key, which the identity signature used to satisfy
+    /// trivially (both pairings are 1 in GT); the batch must reject that pair too, though it
+    /// leaves the batch's sums unchanged.
+    #[test]
+    fn test_partial_verify_rejects_invalid_signatures() {
+        let n = 8;
+        let msg = b"partial";
+        let (crs, _ak, _vk, sks, epks) = sample_universe(n);
+
+        // only parties 0 to 3 register, so slots 4 to 6 hold the identity key
+        let weights = sample_weights(n);
+        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
+            (0..4).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let (_vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
+        let absent = 4;
+        assert!(ak.pks[absent].is_zero());
+
+        let sig = HinTS::sign(msg, &sks[0]).unwrap();
+        let identity = G2AffinePoint::zero();
+
+        // sanity: the honest signature verifies, singly and in a batch
+        assert!(HinTS::partial_verify(msg, &ak, 0, &sig).unwrap());
+        assert!(HinTS::partial_verify_batch(msg, &ak, [0usize], [sig]).unwrap());
+
+        // a signature on another message, and one under another key
+        let wrong_msg = HinTS::sign(b"other", &sks[0]).unwrap();
+        assert!(!HinTS::partial_verify(msg, &ak, 0, &wrong_msg).unwrap());
+        let wrong_key = HinTS::sign(msg, &HinTS::keygen([7u8; 32]).unwrap()).unwrap();
+        assert!(!HinTS::partial_verify(msg, &ak, 0, &wrong_key).unwrap());
+
+        // the identity signature, on a registered slot and on the absent one
+        assert!(!HinTS::partial_verify(msg, &ak, 0, &identity).unwrap());
+        assert!(!HinTS::partial_verify(msg, &ak, absent, &identity).unwrap());
+        assert!(!HinTS::partial_verify_batch(msg, &ak, [0, absent], [sig, identity]).unwrap());
     }
 
     /// A key whose n disagrees with its vectors must be rejected by every consumer, rather

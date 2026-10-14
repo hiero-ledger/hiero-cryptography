@@ -20,8 +20,8 @@ tasks.test {
 
 jmhModuleInfo {
     requires("com.hedera.cryptography.libsecp256k1")
-    requires("org.hyperledger.besu.nativelib.secp256k1")
     requires("com.sun.jna")
+    requires("org.hyperledger.besu.nativelib.secp256k1")
 }
 
 /// Where we check out the native library repo from GitHub into the local build/ directory:
@@ -34,8 +34,8 @@ val libOutputDir = layout.buildDirectory.dir("libsecp256k1/output")
 tasks.register<GitClone>("cloneSecp256k1") {
     localCloneDirectory = libRepositoryDir
     url = "https://github.com/bitcoin-core/secp256k1.git"
-    // branch = "master"
-    tag = "v0.7.1"
+    // The commit hash for tag v0.7.1 as of 2026-10-14:
+    tag = "1a53f4961f337b4d166c25fce72ef0dc88806618"
 }
 
 // We cannot build from a single repo for multiple targets at once. So we limit parallelizm:

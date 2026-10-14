@@ -20,8 +20,8 @@ tasks.test {
 
 jmhModuleInfo {
     requires("com.hedera.cryptography.libsodium")
-    requires("com.goterl.lazysodium")
     requires("com.hedera.pbj.runtime")
+    requires("com.goterl.lazysodium")
 }
 
 /// Where we check out the libsodium repo from GitHub into the local build/ directory:
@@ -34,8 +34,8 @@ val libOutputDir = layout.buildDirectory.dir("libsodium/output")
 tasks.register<GitClone>("cloneLibsodium") {
     localCloneDirectory = libRepositoryDir
     url = "https://github.com/jedisct1/libsodium.git"
-    // branch = "master"
-    tag = "1.0.22-RELEASE"
+    // The commit hash for tag 1.0.22-RELEASE as of 2026-10-14:
+    tag = "77e1ce5d6dee871c49ef211222ba18ef0c486bda"
 }
 
 // We cannot build from a single repo for multiple targets at once. So we limit parallelizm:

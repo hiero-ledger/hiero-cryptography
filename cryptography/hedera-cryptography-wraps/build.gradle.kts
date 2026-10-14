@@ -17,7 +17,8 @@ cargo {
 val prepareHalo2curves =
     tasks.register<GitClone>("prepareHalo2curves") {
         url = "https://github.com/privacy-ethereum/halo2curves.git"
-        tag = "v0.9.0"
+        // The commit hash corresponding to the v0.9.0 tag as of 2026-10-14:
+        tag = "4b7a69e6a3f1878b150c212d73ec82a3210c29f9"
         patches.from(
             layout.projectDirectory.file("src/main/rust/nova-wraps/halo2curves-v0.9.0.patch")
         )

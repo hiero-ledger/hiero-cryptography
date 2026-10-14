@@ -58,10 +58,6 @@ abstract class BuildLibsodiumTask : DefaultTask() {
     /// ./configure --host ... string, or a blank string to omit the --host arg.
     @get:Input abstract val configureHost: Property<String>
 
-    /// To make Gradle Cache happy, we're adding yet another input property that contains "os-arch".
-    /// Apparently, the `outputPath` below is insufficient for Gradle Cache to key an entry.
-    @get:Input abstract val targetId: Property<String>
-
     /// Where the binary library to be written.
     /// Likely build/third-party/<name>/output/<os>-<arch>.
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -210,7 +206,6 @@ targets.forEach { target ->
         tasks.register<BuildLibsodiumTask>(name) {
             libraryDir = tasks.named<GitClone>("cloneLibsodium").flatMap { it.localCloneDirectory }
             configureHost = target.configureHost
-            targetId = "${target.os}-${target.arch}"
             outputDir = libOutputDir.get().dir("${target.os}-${target.arch}")
             outputPath = "com/hedera/nativelib/libsodium/${target.os}/${target.arch}"
         }

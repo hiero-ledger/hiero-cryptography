@@ -16,6 +16,7 @@ pub struct JNIMapCache<T: CanonicalDeserialize, const SIZE: usize> {
     /// Arc allows us to share the value as a reference with callers of the get() function.
     option_map_cell: RwLock<Option<HashMap<Vec<u8>, Arc<T>>>>,
 
+    /// LRU cache support.
     lru_list: RwLock<Option<LinkedList<Vec<u8>>>>,
 }
 
@@ -34,7 +35,7 @@ impl<T: CanonicalDeserialize, const SIZE: usize> JNIMapCache<T, SIZE> {
 
     /// Pushes the lru key to the back of the list, and returns Some(pop_front()) if full,
     /// or None otherwise.
-    fn access_key(&self, key: &Vec<u8>/*[u8]*/) -> Option<Vec<u8>> {
+    fn access_key(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
         let mut write_guard = self.lru_list.write().unwrap();
         if write_guard.is_none() {
             *write_guard = Some(LinkedList::new());

@@ -7,7 +7,7 @@ use ark_ec::hashing::{
 use ark_ec::pairing::{Pairing, PairingOutput};
 use ark_ec::{
     short_weierstrass::{Affine, Projective},
-    AffineRepr, CurveGroup,
+    AffineRepr, CurveGroup, VariableBaseMSM,
 };
 use ark_ff::{field_hashers::{DefaultFieldHasher, HashToField}, Field};
 use ark_poly::{univariate::DensePolynomial, EvaluationDomain, Polynomial, Radix2EvaluationDomain};
@@ -665,7 +665,7 @@ impl HinTS {
             ));
         }
 
-        // an empty batch verifies vacuously: add() returns the identity in both groups, so the
+        // an empty batch verifies vacuously: msm returns the identity in both groups, so the
         // pairing check below collapses to 1_GT == 1_GT and we would report success without
         // having verified anything. Wrong direction to fail in.
         if signer_ids.as_ref().is_empty() {
@@ -686,10 +686,24 @@ impl HinTS {
         check_or_return_false!(signer_ids.as_ref().iter().all(|&id| !ak.pks[id].is_zero()));
         check_or_return_false!(signatures.as_ref().iter().all(|sig| !sig.is_zero()));
 
-        // compute aggregate public key of all signers
-        let apk = add::<G1AffinePoint>(signer_ids.as_ref().iter().map(|&x| ak.pks[x]));
-        // compute aggregate signature
-        let agg_sig = add::<G2AffinePoint>(signatures.as_ref().iter().map(|sig| sig.clone()));
+        // Comparing only the plain sums would accept invalid signatures whose errors cancel:
+        // for any point D, σ_a + D and σ_b - D have the same sum as σ_a and σ_b. So we weight
+        // entry i by r^i, for an r drawn at random after the batch is fixed. If any entry is
+        // invalid, the weighted check passes only if r is a root of a nonzero polynomial of
+        // degree below the batch size k, which happens with probability below k/|F|.
+        let r = F::rand(&mut rand::rngs::OsRng);
+        // the weights 1, r, r^2, ..., r^(k-1): successors yields its first argument, then keeps
+        // applying the closure to the last value, so each weight is the previous one times r;
+        // the closure never returns None, so take(k) is what ends the sequence
+        let coefficients: Vec<F> = std::iter::successors(Some(F::from(1)), |c| Some(*c * r))
+            .take(signatures.as_ref().len())
+            .collect();
+
+        // compute weighted aggregate public key of all signers
+        let pks: Vec<PublicKey> = signer_ids.as_ref().iter().map(|&x| ak.pks[x]).collect();
+        let apk = G1ProjectivePoint::msm_unchecked(&pks, &coefficients);
+        // compute weighted aggregate signature
+        let agg_sig = G2ProjectivePoint::msm_unchecked(signatures.as_ref(), &coefficients);
 
         let lhs = <Curve as Pairing>::pairing(apk, hash_to_g2(msg)?);
         let rhs = <Curve as Pairing>::pairing(G1AffinePoint::generator(), agg_sig);
@@ -1673,6 +1687,25 @@ mod tests {
         assert!(!HinTS::partial_verify(msg, &ak, 0, &identity).unwrap());
         assert!(!HinTS::partial_verify(msg, &ak, absent, &identity).unwrap());
         assert!(!HinTS::partial_verify_batch(msg, &ak, [0, absent], [sig, identity]).unwrap());
+    }
+
+    /// The batch used to check only the plain sums, so entries whose errors cancel passed:
+    /// σ_a + D and σ_b - D from two signers, or from one signer listed twice.
+    #[test]
+    fn test_partial_verify_batch_rejects_offsetting_signatures() {
+        let msg = b"offset";
+        let (_crs, ak, _vk, sks, _epks) = sample_universe(8);
+        let sig_a = HinTS::sign(msg, &sks[1]).unwrap();
+        let sig_b = HinTS::sign(msg, &sks[4]).unwrap();
+        let d = G2AffinePoint::generator();
+
+        // sanity: the honest batch verifies
+        assert!(HinTS::partial_verify_batch(msg, &ak, [1usize, 4], [sig_a, sig_b]).unwrap());
+
+        let (a_plus, a_minus, b_minus) =
+            ((sig_a + d).into_affine(), (sig_a - d).into_affine(), (sig_b - d).into_affine());
+        assert!(!HinTS::partial_verify_batch(msg, &ak, [1usize, 4], [a_plus, b_minus]).unwrap());
+        assert!(!HinTS::partial_verify_batch(msg, &ak, [1usize, 1], [a_plus, a_minus]).unwrap());
     }
 
     /// A key whose n disagrees with its vectors must be rejected by every consumer, rather

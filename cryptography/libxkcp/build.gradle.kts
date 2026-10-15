@@ -10,8 +10,8 @@ plugins {
 }
 
 testModuleInfo {
-    requires("org.junit.jupiter.api")
     requires("org.bouncycastle.provider")
+    requires("org.junit.jupiter.api")
 }
 
 tasks.test {

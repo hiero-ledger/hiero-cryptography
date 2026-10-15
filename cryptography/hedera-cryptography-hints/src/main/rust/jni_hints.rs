@@ -10,8 +10,8 @@ use crate::jni_util;
 
 // Caches for some values to save time on parsing them from bytes.
 // Java applications can reset the caches by calling HintsLibraryBridge.resetCache().
-static CRS_CACHE: JNIMapCache<CRS> = JNIMapCache::new();
-static AGGREGATION_KEY_CACHE: JNIMapCache<AggregationKey> = JNIMapCache::new();
+static CRS_CACHE: JNIMapCache<CRS, 4> = JNIMapCache::new();
+static AGGREGATION_KEY_CACHE: JNIMapCache<AggregationKey, 4> = JNIMapCache::new();
 
 /// JNI for HintsLibraryBridge.generateSecretKey
 #[no_mangle]

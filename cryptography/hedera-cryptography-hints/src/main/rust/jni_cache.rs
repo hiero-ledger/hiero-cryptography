@@ -1,52 +1,78 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use ark_serialize::CanonicalDeserialize;
 use jni::JNIEnv;
 use jni::objects::JByteArray;
 
-/// A cache for a value deserializable from a JByteArray.
-pub struct JNICache<T> {
-    /// The cached value
+/// A cache for values deserializable from a JByteArray.
+pub struct JNIMapCache<T: CanonicalDeserialize> {
+    /// Cached values
     /// RwLock provides a thread-safe mutable cell.
-    /// Option lets us start with the cache empty.
+    /// Option lets us start with the cache empty and avoids calling HashMap::new because
+    /// this doesn't work in a static context.
     /// Arc allows us to share the value as a reference with callers of the get() function.
-    option_value_cell: RwLock<Option<Arc<T>>>,
-
-    /// A supplier for a value to initialize the cache.
-    supplier: fn(&JNIEnv, &JByteArray) -> Result<T, Box<dyn Any>>
+    option_map_cell: RwLock<Option<HashMap<Vec<u8>, Arc<T>>>>,
 }
 
-impl<T> JNICache<T> {
-    /// Create a new cache instance with no value installed.
-    pub const fn new(s: fn(&JNIEnv, &JByteArray) -> Result<T, Box<dyn Any>>) -> JNICache<T> {
-        JNICache {
-            option_value_cell: RwLock::new(None),
-            supplier: s
+impl<T: CanonicalDeserialize> JNIMapCache<T> {
+    /// Create a new cache instance.
+    pub const fn new() -> JNIMapCache<T> {
+        JNIMapCache {
+            // The new() must be `const` so that we can initialize a `static` variable using it.
+            // HashMap::new() cannot be called from a `const` function.
+            // Therefore, we initialize the cell with None and create the map lazily.
+            option_map_cell: RwLock::new(None),
         }
     }
 
     /// Get the cached value, and initialize it if necessary.
     pub fn get(&self, env: &JNIEnv, jarray: &JByteArray) -> Result<Arc<T>, Box<dyn Any>> {
-        // Take locks for the shortest times possible.
-        // read()./write().unwrap() is safe. If it fails, we're in a much bigger trouble.
-        // Option./result.unwrap() is safe because it's guarded with proper if/else.
-        let is_none = { self.option_value_cell.read().unwrap().is_none() };
-        if is_none {
-            let result = (self.supplier)(env, jarray);
-            if result.is_err() {
-                return Err(result.err().unwrap());
-            }
+        let vec = match env.convert_byte_array(&jarray) {
+            Ok(val) => val,
+            Err(err) => return Err(Box::new(err))
+        };
 
-            *self.option_value_cell.write().unwrap() = Some(Arc::new(result.unwrap()));
+        // Fast-path first, enclose in a {} block to release the read lock afterward:
+        {
+            let read_guard = self.option_map_cell.read().unwrap();
+            if read_guard.is_some() {
+                let option = read_guard.as_ref().unwrap().get(&vec);
+                if option.is_some() {
+                    return Ok(option.unwrap().clone());
+                }
+            }
         }
 
-        Ok(self.option_value_cell.read().unwrap().as_ref().unwrap().clone())
+        // Slow-path: either the map doesn't exist, or the value isn't cached.
+        let mut write_guard = self.option_map_cell.write().unwrap();
+        if write_guard.is_none() {
+            *write_guard = Some(HashMap::new());
+        }
+
+        let the_map = write_guard.as_mut().unwrap();
+        if the_map.contains_key(&vec) {
+            return Ok(the_map.get(&vec).unwrap().clone());
+        }
+
+        // Slowest-path: the value isn't cached yet:
+        match T::deserialize_uncompressed(&*vec) {
+            Ok(val) => {
+                let arc = Arc::new(val);
+                the_map.insert(vec, arc.clone());
+                Ok(arc)
+            },
+            Err(err) => Err(Box::new(err))
+        }
     }
 
-    /// Clear the cached value.
+    /// Clear cached values.
     pub fn reset(&self) {
-        // write().unwrap() is safe. If it fails, we're in a much bigger trouble.
-        *self.option_value_cell.write().unwrap() = None;
+        let mut write_guard = self.option_map_cell.write().unwrap();
+        if write_guard.is_some() {
+            write_guard.as_mut().unwrap().clear();
+        }
     }
 }

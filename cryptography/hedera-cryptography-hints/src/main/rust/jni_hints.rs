@@ -5,13 +5,13 @@ use jni::JNIEnv;
 use jni::objects::{JByteArray, JIntArray, JLongArray, JObject, JObjectArray, JValue};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, jobject, jsize};
 use crate::hints::{AggregationKey, ExtendedPublicKey, HinTS, PartialSignature, SecretKey, ThresholdSignature, VerificationKey, Weight, CRS, F};
-use crate::jni_cache::JNICache;
+use crate::jni_cache::JNIMapCache;
 use crate::jni_util;
 
-// Caches for some "static" values to save time on parsing them from bytes.
+// Caches for some values to save time on parsing them from bytes.
 // Java applications can reset the caches by calling HintsLibraryBridge.resetCache().
-static CRS_CACHE: JNICache<CRS> = JNICache::new(jni_util::deserialize_jbyte_array);
-static AGGREGATION_KEY_CACHE: JNICache<AggregationKey> = JNICache::new(jni_util::deserialize_jbyte_array);
+static CRS_CACHE: JNIMapCache<CRS> = JNIMapCache::new();
+static AGGREGATION_KEY_CACHE: JNIMapCache<AggregationKey> = JNIMapCache::new();
 
 /// JNI for HintsLibraryBridge.generateSecretKey
 #[no_mangle]

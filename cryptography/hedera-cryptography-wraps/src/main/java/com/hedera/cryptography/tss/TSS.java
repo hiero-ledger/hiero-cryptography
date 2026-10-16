@@ -17,6 +17,30 @@ public final class TSS {
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final WRAPSLibraryBridge WRAPS = WRAPSLibraryBridge.getInstance();
 
+    // WRAPS proof may take up to 300ms to compute, so we cache them because they usually stay
+    // constant for many verifications.
+
+    private record Key(byte[] abProof, byte[] ledgerId, byte[] hintsVerificationKey) {
+        @Override
+        public boolean equals(Object obj) {
+            if (obj instanceof Key key) {
+                return Arrays.equals(abProof, key.abProof)
+                        && Arrays.equals(ledgerId, key.ledgerId)
+                        && Arrays.equals(hintsVerificationKey, key.hintsVerificationKey);
+            }
+            return false;
+        }
+
+        @Override
+        public int hashCode() {
+            return 3 * Arrays.hashCode(abProof)
+                    + 5 * Arrays.hashCode(ledgerId)
+                    + 7 * Arrays.hashCode(hintsVerificationKey);
+        }
+    }
+
+    private static final LRUCache<Key, Boolean> WRAPS_PROOF_CACHE = new LRUCache<>(8);
+
     private TSS() {}
 
     /**
@@ -98,7 +122,10 @@ public final class TSS {
         final byte[] hintsVerificationKey = Arrays.copyOfRange(tssSignature, 0, HINTS_VERIFICATION_KEY_LENGTH);
         final byte[] abProof = Arrays.copyOfRange(
                 tssSignature, HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH, tssSignature.length);
-        if (!WRAPS.verifyCompressedProof(abProof, ledgerId, hintsVerificationKey)) {
+
+        if (!WRAPS_PROOF_CACHE.get(
+                new Key(abProof, ledgerId, hintsVerificationKey),
+                key -> WRAPS.verifyCompressedProof(key.abProof(), key.ledgerId(), key.hintsVerificationKey()))) {
             return false;
         }
 

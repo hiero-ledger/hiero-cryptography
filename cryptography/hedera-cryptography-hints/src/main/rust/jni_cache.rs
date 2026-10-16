@@ -2,22 +2,82 @@
 
 use std::any::Any;
 use std::collections::{HashMap, LinkedList};
+use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 use ark_serialize::CanonicalDeserialize;
 use jni::JNIEnv;
 use jni::objects::JByteArray;
 
+/// An internal, not synchronized implementation of an LRU cache.
+/// A client-facing cache API wrapper is responsible for synchronization.
+struct LRUCache<K: Eq + PartialEq + Hash + Clone, V, const SIZE: usize> {
+    /// Arc allows us to share the value as a reference with clients.
+    cache_map: HashMap<K, Arc<V>>,
+
+    lru_list: LinkedList<K>
+}
+
+impl<K: Eq + PartialEq + Hash + Clone, V, const SIZE: usize> LRUCache<K, V, SIZE> {
+    fn new() -> Self {
+        LRUCache {
+            cache_map: HashMap::new(),
+            lru_list: LinkedList::new(),
+        }
+    }
+
+    /// LRU bookkeeping.
+    fn push_back_key(&mut self, key: &K) {
+        self.lru_list.extract_if(|v| v == key).for_each(drop);
+        self.lru_list.push_back(key.clone());
+    }
+
+    /// If hit, do LRU bookkeeping and return Some(Arc), otherwise None.
+    fn get_if_hit(&mut self, key: &K) -> Option<Arc<V>> {
+        let option_arc_clone = match self.cache_map.get(key) {
+            Some(v) => Some(v.clone()),
+            None => return None
+        };
+        self.push_back_key(key);
+        option_arc_clone
+    }
+
+    /// Insert the (K, V) if missing and return an Arc<V>,
+    /// performing LRU bookkeeping and managing the cache size.
+    fn insert(&mut self, key: &K, value: V) -> Arc<V> {
+        let try_hit = self.get_if_hit(key);
+        if try_hit.is_some() {
+            return try_hit.unwrap();
+        }
+
+        let arc = Arc::new(value);
+        self.push_back_key(key);
+        self.cache_map.insert(key.clone(), arc.clone());
+
+        if self.lru_list.len() > SIZE {
+            let key_to_evict = self.lru_list.pop_front();
+            self.cache_map.remove(&key_to_evict.unwrap());
+        }
+
+        // This should not panic because the outer wrapper synchronizes access:
+        assert_eq!(self.lru_list.len(), self.cache_map.len());
+
+        arc
+    }
+
+    /// Clear the cache.
+    fn reset(&mut self) {
+        self.lru_list.clear();
+        self.cache_map.clear();
+    }
+}
+
 /// A cache for values deserializable from a JByteArray.
+/// This is a wrapper around an LRUCache object that orchestrates synchronization.
 pub struct JNIMapCache<T: CanonicalDeserialize, const SIZE: usize> {
-    /// Cached values
     /// RwLock provides a thread-safe mutable cell.
     /// Option lets us start with the cache empty and avoids calling HashMap::new because
     /// this doesn't work in a static context.
-    /// Arc allows us to share the value as a reference with callers of the get() function.
-    option_map_cell: RwLock<Option<HashMap<Vec<u8>, Arc<T>>>>,
-
-    /// LRU cache support.
-    lru_list: RwLock<Option<LinkedList<Vec<u8>>>>,
+    option_cache_cell: RwLock<Option<LRUCache<Vec<u8>, T, SIZE>>>,
 }
 
 impl<T: CanonicalDeserialize, const SIZE: usize> JNIMapCache<T, SIZE> {
@@ -25,35 +85,10 @@ impl<T: CanonicalDeserialize, const SIZE: usize> JNIMapCache<T, SIZE> {
     pub const fn new() -> JNIMapCache<T, SIZE> {
         JNIMapCache {
             // The new() must be `const` so that we can initialize a `static` variable using it.
-            // HashMap::new() cannot be called from a `const` function.
-            // Therefore, we initialize the cell with None and create the map lazily.
-            option_map_cell: RwLock::new(None),
-
-            lru_list: RwLock::new(None),
+            // LRUCache::new() cannot be called from a `const` function.
+            // Therefore, we initialize the cell with None and create the cache lazily.
+            option_cache_cell: RwLock::new(None),
         }
-    }
-
-    /// Pushes the lru key to the back of the list, and returns Some(pop_front()) if full,
-    /// or None otherwise.
-    fn access_key(&self, key: &Vec<u8>) -> Option<Vec<u8>> {
-        let mut write_guard = self.lru_list.write().unwrap();
-        if write_guard.is_none() {
-            *write_guard = Some(LinkedList::new());
-        }
-
-        let the_list = write_guard.as_mut().unwrap();
-        if !the_list.is_empty() && the_list.back().unwrap() == key {
-            return None;
-        }
-
-        let _ = the_list.extract_if(|v| v == key);
-        the_list.push_back(key.clone());
-
-        if the_list.len() > SIZE {
-            return Some(the_list.pop_front().unwrap())
-        }
-
-        None
     }
 
     /// Get the cached value, and initialize it if necessary.
@@ -63,55 +98,34 @@ impl<T: CanonicalDeserialize, const SIZE: usize> JNIMapCache<T, SIZE> {
             Err(err) => return Err(Box::new(err))
         };
 
-        match self.access_key(&vec) {
-            Some(key_to_evict) => {
-                let mut write_guard = self.option_map_cell.write().unwrap();
-                if !write_guard.is_none() {
-                    write_guard.as_mut().unwrap().remove(&key_to_evict);
-                }
-            },
-            None => {}
-        };
-
-        // Fast-path first, enclose in a {} block to release the read lock afterward:
+        // Fast-path: see if this is a cache hit:
         {
-            let read_guard = self.option_map_cell.read().unwrap();
-            if read_guard.is_some() {
-                let option = read_guard.as_ref().unwrap().get(&vec);
-                if option.is_some() {
-                    return Ok(option.unwrap().clone());
+            let mut guard = self.option_cache_cell.write().unwrap();
+            if guard.is_none() {
+                *guard = Some(LRUCache::new());
+            } else {
+                let option_arc= guard.as_mut().unwrap().get_if_hit(&vec);
+                if option_arc.is_some() {
+                    return Ok(option_arc.unwrap());
                 }
             }
         }
 
-        // Slow-path: either the map doesn't exist, or the value isn't cached.
-        // First, deserialize the value w/o any locks:
-        let arc = match T::deserialize_uncompressed(&*vec) {
-            Ok(val) => Arc::new(val),
+        // It's a cache miss. Slow deserialization is happening outside any locks:
+        let val = match T::deserialize_uncompressed(&*vec) {
+            Ok(val) => val,
             Err(err) => return Err(Box::new(err))
         };
 
-        // Then take the write() lock and insert it if absent:
-        let mut write_guard = self.option_map_cell.write().unwrap();
-        if write_guard.is_none() {
-            *write_guard = Some(HashMap::new());
-        }
-
-        let the_map = write_guard.as_mut().unwrap();
-        if the_map.contains_key(&vec) {
-            // Another thread inserted the value already, so we drop our arc from above.
-            return Ok(the_map.get(&vec).unwrap().clone());
-        }
-
-        the_map.insert(vec, arc.clone());
-        Ok(arc)
+        let mut guard = self.option_cache_cell.write().unwrap();
+        Ok(guard.as_mut().unwrap().insert(&vec, val))
     }
 
     /// Clear cached values.
     pub fn reset(&self) {
-        let mut write_guard = self.option_map_cell.write().unwrap();
+        let mut write_guard = self.option_cache_cell.write().unwrap();
         if write_guard.is_some() {
-            write_guard.as_mut().unwrap().clear();
+            write_guard.as_mut().unwrap().reset();
         }
     }
 }

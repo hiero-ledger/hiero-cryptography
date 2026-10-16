@@ -124,7 +124,7 @@ public final class TSS {
                 tssSignature, HINTS_VERIFICATION_KEY_LENGTH + HINTS_SIGNATURE_LENGTH, tssSignature.length);
 
         if (!WRAPS_PROOF_CACHE.get(
-                new Key(abProof, ledgerId, hintsVerificationKey),
+                new Key(abProof, ledgerId.clone(), hintsVerificationKey),
                 key -> WRAPS.verifyCompressedProof(key.abProof(), key.ledgerId(), key.hintsVerificationKey()))) {
             return false;
         }

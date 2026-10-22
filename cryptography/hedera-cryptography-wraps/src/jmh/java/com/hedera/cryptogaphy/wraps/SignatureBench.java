@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package com.hedera.cryptogaphy.wraps;
+package com.hedera.cryptography.wraps;
 
 import com.hedera.cryptography.hints.AggregationAndVerificationKeys;
 import com.hedera.cryptography.hints.HintsLibraryBridge;

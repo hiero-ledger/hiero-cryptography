@@ -83,6 +83,12 @@ public record OID(String oid) implements DerEncoder {
 
     // BigEndian VarInt encoding (unlike the Protobuf varint that uses LittleEndian.)
     private static int pack7Oid(BigInteger input, byte[] out, int offset) {
+        // Short-circuit for zero because the generic implementation below would skip it:
+        if (input.compareTo(BigInteger.ZERO) == 0) {
+            out[offset] = (byte) 0x00;
+            return 1;
+        }
+
         final int origOffset = offset;
 
         // This is a BigEndian array already:

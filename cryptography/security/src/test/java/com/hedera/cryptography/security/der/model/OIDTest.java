@@ -27,4 +27,14 @@ public class OIDTest {
         // Ensure we emit the same encoded bytes as BC:
         TestUtils.assertArrayEquals(bcArray, array);
     }
+
+    @Test
+    void testZeroArc() throws Exception {
+        final DerOutputStream baos = new DerOutputStream();
+        new OID("1.2.0.1").encode(baos);
+        final byte[] array = baos.toByteArray();
+
+        // tag 6 == OID, len 3 bytes, and then the encoded OID value:
+        TestUtils.assertArrayEquals(new byte[] {0x06, 0x03, 0x2A, 0x00, 0x01}, array);
+    }
 }

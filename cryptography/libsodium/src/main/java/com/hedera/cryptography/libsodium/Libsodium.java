@@ -179,7 +179,7 @@ public final class Libsodium {
         if (m.byteSize() < mlen) {
             return 3;
         }
-        if (sig.byteSize() < ED25519_BYTES) {
+        if (sig.byteSize() != ED25519_BYTES) {
             return 4;
         }
 

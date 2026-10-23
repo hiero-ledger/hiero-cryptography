@@ -138,5 +138,21 @@ public class LibsodiumTest {
                         MemorySegment.ofArray(Constants.M),
                         Constants.M.length,
                         MemorySegment.ofArray(badPK)));
+
+        // Test signatures of lengths other than 64
+        assertEquals(
+                4,
+                INSTANCE.cryptoSignVerifyDetached(
+                        MemorySegment.ofArray(Arrays.copyOfRange(Constants.SIG, 0, 63)),
+                        MemorySegment.ofArray(Constants.M),
+                        Constants.M.length,
+                        MemorySegment.ofArray(Constants.PK)));
+        assertEquals(
+                4,
+                INSTANCE.cryptoSignVerifyDetached(
+                        MemorySegment.ofArray(Arrays.copyOf(Constants.SIG, 65)),
+                        MemorySegment.ofArray(Constants.M),
+                        Constants.M.length,
+                        MemorySegment.ofArray(Constants.PK)));
     }
 }

@@ -253,6 +253,39 @@ public class WRAPSLibraryBridgeTest {
     }
 
     @Test
+    public void testRunSigningProtocolPhaseWithSentinelKey() {
+        final Network network = new Network(List.of(
+                Node.from(Constants.SEED_0, 1000, 0),
+                Node.from(Constants.SEED_1, 0, 1),
+                Node.from(Constants.SEED_2, 100, 2)));
+        final boolean[] signers = new boolean[] {true, true, true};
+
+        final Node node = network.nodes().get(0);
+
+        byte[] hintsVK = new byte[1096];
+        final byte[] message =
+                WRAPS.computeNetworkID(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
+
+        // R1 uses an empty AB, so we test this logic on R2:
+        final SigningProtocolOutput output = aggregateSignature(network, message);
+        final byte[][] publicKeys = network.publicKeys();
+        publicKeys[0] = WRAPS.provideSentinelPublicKey();
+
+        assertNull(WRAPS.runSigningProtocolPhase(
+                WRAPSLibraryBridge.SigningProtocolPhase.R2,
+                node.seed(),
+                message,
+                node.schnorrKeys().privateKey(),
+                publicKeys,
+                network.weights(),
+                network.nodeIds(),
+                signers,
+                listToArray(output.roundMessages.get(0)),
+                EMPTY_BYTE_ARRAY_2,
+                EMPTY_BYTE_ARRAY_2));
+    }
+
+    @Test
     public void testRunSigningProtocolPhaseConstraints() {
         final Network network = new Network(List.of(
                 Node.from(Constants.SEED_0, 1000, 0),

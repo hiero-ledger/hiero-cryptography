@@ -141,6 +141,9 @@ public class WRAPSLibraryBridge {
      * @return true if `constructWrapsProof` is operational
      */
     public static boolean isProofSupported() {
+        // Load the native library before trying to load binary files:
+        WRAPSLibraryBridge.getInstance();
+
         return PublicParamsLoader.INSTANCE.loaded;
     }
 
@@ -149,6 +152,9 @@ public class WRAPSLibraryBridge {
      * @return true if `verifyCompressedProof` are operational
      */
     public static boolean isVerificationSupported() {
+        // Load the native library before trying to load binary files:
+        WRAPSLibraryBridge.getInstance();
+
         return CompressedVerifyingKeyLoader.INSTANCE.loaded;
     }
 

@@ -26,6 +26,9 @@ public final class Libsodium {
         return InstanceHolder.INSTANCE;
     }
 
+    /// Key seed length.
+    public static final int ED25519_SEEDBYTES = 32;
+
     /// Public Key length.
     public static final int ED25519_PUBLICKEYBYTES = 32;
 
@@ -37,6 +40,7 @@ public final class Libsodium {
 
     // Handles for native functions
     private final MethodHandle cryptoSignKeypair;
+    private final MethodHandle cryptoSignSeedKeypair;
     private final MethodHandle cryptoSignDetached;
     private final MethodHandle cryptoSignVerifyDetached;
 
@@ -61,6 +65,13 @@ public final class Libsodium {
                         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
                         Linker.Option.critical(true)))
                 .orElseThrow(() -> new IllegalStateException("Function 'crypto_sign_keypair' not found"));
+
+        this.cryptoSignSeedKeypair = ForeignLibrary.find(
+                lookup,
+                linker,
+                "crypto_sign_seed_keypair",
+                FunctionDescriptor.of(
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 
         this.cryptoSignDetached = lookup.find("crypto_sign_detached")
                 .map(symbol -> linker.downcallHandle(
@@ -113,6 +124,39 @@ public final class Libsodium {
     /// May crash in native code, but is faster if the caller knows what it's doing.
     public int cryptoSignKeypairNoChecks(final MemorySegment pk, final MemorySegment sk) throws Throwable {
         return (int) cryptoSignKeypair.invokeExact(pk, sk);
+    }
+
+    /// Libsodium crypto_sign_seed_keypair API to generate a key pair from a seed.
+    /// @param pk receives public key, must be 32 bytes long.
+    /// @param sk receives secret key, must be 64 bytes long.
+    /// @param seed a seed to generate the key, must be 32 bytes long.
+    /// @return 0 on success
+    public int cryptoSignSeedKeypair(final MemorySegment pk, final MemorySegment sk, final MemorySegment seed) {
+        if (pk.byteSize() != ED25519_PUBLICKEYBYTES) {
+            throw new IllegalArgumentException(
+                    "pk must be " + ED25519_PUBLICKEYBYTES + " bytes long, got: " + pk.byteSize());
+        }
+        if (sk.byteSize() != ED25519_SECRETKEYBYTES) {
+            throw new IllegalArgumentException(
+                    "sk must be " + ED25519_SECRETKEYBYTES + " bytes long, got: " + sk.byteSize());
+        }
+        if (seed.byteSize() != ED25519_SEEDBYTES) {
+            throw new IllegalArgumentException(
+                    "seed must be " + ED25519_SEEDBYTES + " bytes long, got: " + seed.byteSize());
+        }
+
+        try {
+            return cryptoSignSeedKeypairNoChecks(pk, sk, seed);
+        } catch (Throwable t) {
+            throw new LibsodiumException(t);
+        }
+    }
+
+    /// A fast, unsafe version of cryptoSignSeedKeypair that doesn't validate arguments.
+    /// May crash in native code, but is faster if the caller knows what it's doing.
+    public int cryptoSignSeedKeypairNoChecks(final MemorySegment pk, final MemorySegment sk, final MemorySegment seed)
+            throws Throwable {
+        return (int) cryptoSignSeedKeypair.invokeExact(pk, sk, seed);
     }
 
     /// Libsodium crypto_sign_detached API to sign a message.

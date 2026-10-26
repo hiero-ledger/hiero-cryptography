@@ -56,6 +56,21 @@ public class LibsodiumTest {
     }
 
     @Test
+    void cryptoSignSeedKeypair() throws Throwable {
+        byte[] pk = new byte[32];
+        byte[] sk = new byte[64];
+
+        // Use the M as seed because it's 32 bytes long, just what we need:
+        assertEquals(
+                0,
+                INSTANCE.cryptoSignSeedKeypair(
+                        MemorySegment.ofArray(pk), MemorySegment.ofArray(sk), MemorySegment.ofArray(Constants.M)));
+
+        assertArrayEquals(Constants.SEED_PK, pk);
+        assertArrayEquals(Constants.SEED_SK, sk);
+    }
+
+    @Test
     void cryptoSignDetached() throws Throwable {
         byte[] sig = new byte[64];
         byte[] sigLen = new byte[Long.BYTES];

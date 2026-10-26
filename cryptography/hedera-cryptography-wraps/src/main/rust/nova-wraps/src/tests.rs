@@ -841,7 +841,7 @@ fn identity_seats_are_accepted_and_contribute_to_neither_sum() {
   );
 }
 
-/// Weight parked on a seat nobody can sign for must not count — not for the subset
+/// Weight parked on a seat anyone can sign for must not count — not for the subset
 /// claiming it, and not for the total it is measured against.
 ///
 /// The identity contributes nothing to a joint key, so a signature over a subset that
@@ -1612,7 +1612,7 @@ fn duplicate_live_keys_are_rejected_even_outside_the_signing_subset() {
 }
 
 #[test]
-fn signing_protocol_ignores_selected_duplicate_sentinel_seats() {
+fn signing_and_verification_reject_selected_sentinel_seats() {
   use SigningProtocolPhase::{Aggregate, R1, R2, R3};
   let mut f = SigningFixture::new();
   f.book = vec![
@@ -1624,13 +1624,14 @@ fn signing_protocol_ignores_selected_duplicate_sentinel_seats() {
     f.book[2].clone(),
     (Base::from(6), WRAPS::sentinel_keygen(), u64::MAX),
   ];
-  f.bits = BitVector::from(core::array::from_fn(|i| i < f.book.len() && i != 3));
+  // The fixture's signers, now at seats 1 and 5; the member at seat 3 still abstains.
+  f.bits = BitVector::from(core::array::from_fn(|i| i == 1 || i == 5));
   assert!(verify_address_book::<E2>(&f.book));
   assert!(WRAPS::compute_addressbook_hash(&f.book).is_ok());
   assert_eq!(subset_weight::<E2>(&f.book, &f.bits), Some((2, 3)));
 
   // The original two real signers keep their transcript positions despite the
-  // selected sentinel seats before, between, and after them. Sentinels send nothing.
+  // sentinel seats before, between, and after them in the book.
   for (signer, key) in [0, 2].into_iter().enumerate() {
     for (round, phase) in [R1, R2, R3].into_iter().enumerate() {
       let histories = match phase {
@@ -1668,6 +1669,38 @@ fn signing_protocol_ignores_selected_duplicate_sentinel_seats() {
     .unwrap_err(),
     WrapsError::invalid_input("R3 signing key is not in the signing subset"),
   );
+
+  // Also selecting any sentinel seat is refused in every phase, before the otherwise
+  // valid transcript is examined, and by verification of the otherwise valid signature.
+  let live = f.bits;
+  for seat in [0, 2, 4, 6] {
+    f.bits = live;
+    f.bits[seat] = true;
+    let expected = WrapsError::invalid_input(format!("bitvector selects sentinel seat {seat}"));
+    for phase in [R1, R2, R3, Aggregate] {
+      let histories = match phase {
+        R1 => [&[][..], &[][..], &[][..]],
+        R2 => [&f.rounds[0][..], &[], &[]],
+        R3 => [&f.rounds[0][..], &f.rounds[1][..], &[]],
+        Aggregate => f.histories(),
+      };
+      assert_eq!(
+        f.call(
+          phase,
+          (phase != Aggregate).then_some(f.seeds[0]),
+          (phase == R3).then_some(&f.keys[0]),
+          histories,
+        )
+        .unwrap_err(),
+        expected,
+        "{phase:?} must refuse sentinel seat {seat}",
+      );
+    }
+    assert_eq!(
+      WRAPS::verify_signature(&f.book, &f.message, &(f.bits, signature.1.clone())).unwrap_err(),
+      expected,
+    );
+  }
 }
 
 #[test]
@@ -2369,6 +2402,29 @@ fn wraps_simulation() {
       .unwrap_err();
       assert!(
         matches!(err, WrapsError::InvalidInput(reason) if reason.contains("outside the previous address book"))
+      );
+
+      // Proof construction inherits the sentinel rule from `verify_signature`: a
+      // bitvector that also claims a seat keyed to the sentinel is refused before proving.
+      let mut sentinel_book = prev.0.clone();
+      let unselected = (0..sentinel_book.len())
+        .find(|&i| !multisignature.0[i])
+        .unwrap();
+      sentinel_book[unselected].1 = WRAPS::sentinel_keygen();
+      let mut claims_sentinel = multisignature.clone();
+      claims_sentinel.0[unselected] = true;
+      assert_eq!(
+        WRAPS::construct_wraps_proof(
+          wraps_pp,
+          &WRAPS::compute_addressbook_hash(&sentinel_book).unwrap(),
+          &sentinel_book,
+          &sentinel_book,
+          None,
+          hints_vk,
+          &claims_sentinel,
+        )
+        .unwrap_err(),
+        WrapsError::invalid_input(format!("bitvector selects sentinel seat {unselected}")),
       );
 
       // Explicit metadata must be authenticated, including when resuming a chain.

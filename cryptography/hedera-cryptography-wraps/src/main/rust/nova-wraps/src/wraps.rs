@@ -233,7 +233,8 @@ fn hash_hints_vk<E: Engine>(vk_bytes: &[u8]) -> HintsVKHash<E> {
 }
 
 /// The nonidentity public keys the bitvector names, in address-book order.
-/// Sentinel seats do not participate in the signing rounds, even when selected.
+/// Identity keys are skipped as a backstop; the public entry points already refuse a
+/// bitvector that selects one (see [`reject_sentinel_signers`]).
 pub(crate) fn signing_subset<E: Engine>(
   ab: &AddressBook<E>,
   bitvector: &BitVector,
@@ -245,6 +246,34 @@ where
     .zip(bitvector.iter())
     .filter_map(|((_, (pk, _pok), _), &signed)| (signed && !pk.to_coordinates().2).then_some(*pk))
     .collect()
+}
+
+/// Refuses a bitvector that selects a seat keyed to the point at infinity.
+///
+/// Such a seat has no owner, and its secret key is zero, which everyone knows: anyone
+/// can answer for it with `s = k`, since `s·G − e·O = k·G`. A share from it therefore
+/// attests nothing, and its weight is already excluded from both sums, so selecting it
+/// gains nothing; but a bitvector naming it misstates who signed, so it is refused
+/// rather than silently narrowed to the live seats. The circuit still treats a selected
+/// identity seat as contributing nothing, so this rule is native only and changes no
+/// setup.
+fn reject_sentinel_signers<E: Engine>(
+  ab: &AddressBook<E>,
+  bitvector: &BitVector,
+) -> Result<(), WrapsError>
+where
+  E::GE: DlogGroup,
+{
+  match ab
+    .iter()
+    .zip(bitvector.iter())
+    .position(|((_, (pk, _pok), _), &signed)| signed && pk.to_coordinates().2)
+  {
+    Some(seat) => Err(WrapsError::invalid_input(format!(
+      "bitvector selects sentinel seat {seat}"
+    ))),
+    None => Ok(()),
+  }
 }
 
 /// `(weight carried by the signing subset, total weight of the book)`.
@@ -496,8 +525,9 @@ impl WRAPS {
   /// Aggregate needs all three rounds; entropy is optional and ignored. A signing key is required
   /// only in R3; it is optional and ignored in R1, R2, and Aggregate.
   /// Every phase validates the book and requires unused bitvector positions to be false.
-  /// Selected sentinel seats require no round messages and are omitted from the participants.
-  /// R2 onward also requires a nonempty subset of nonidentity keys. Quorum weight is
+  /// Every phase also refuses a bitvector that selects a seat keyed to the sentinel: such a
+  /// seat has no owner, and its secret key is the publicly known zero, so its share would
+  /// attest nothing. R2 onward also requires a nonempty signing subset. Quorum weight is
   /// checked by signature verification and proof construction, so below-threshold subsets may still sign.
   ///
   /// The round slices contain the bytes returned as `ProtocolMessage`, in signing-subset
@@ -523,6 +553,7 @@ impl WRAPS {
         "bitvector selects a seat outside the address book",
       ));
     }
+    reject_sentinel_signers(address_book, &bitvector)?;
     let participants = signing_subset(address_book, &bitvector);
     if phase != SigningProtocolPhase::R1 && participants.is_empty() {
       return Err(WrapsError::invalid_input(
@@ -593,7 +624,9 @@ impl WRAPS {
   ///
   /// Returns `false`, rather than an error, whenever the committee is simply not
   /// entitled to the rotation: a malformed book, a subset below the weight threshold, or
-  /// a signature that does not check out. Malformed rotation-message bytes are an error.
+  /// a signature that does not check out. Malformed rotation-message bytes are an error,
+  /// and so is a bitvector that selects a seat keyed to the sentinel, which has no owner
+  /// and whose secret key is the publicly known zero.
   pub fn verify_signature(
     address_book: &AddressBook<E2>,
     message: impl AsRef<[u8]>,
@@ -609,6 +642,7 @@ impl WRAPS {
     if bitvector[address_book.len()..].iter().any(|&signed| signed) {
       return Ok(false);
     }
+    reject_sentinel_signers(address_book, bitvector)?;
     // Weighed and aggregated over the padded book, so this is arithmetic the circuit
     // performs on exactly the same 64 entries. Padding seats carry zero weight and a
     // false bit, so they change neither side of it.

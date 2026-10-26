@@ -306,11 +306,11 @@ where
       )?;
       // The keys are prover-supplied, so each has to be constrained to the curve before
       // it is fed to the group law. The point at infinity is *allowed* here: it is what
-      // an empty seat holds, and the effective-weight step below strips its weight, so a
-      // seat nobody can sign for cannot carry weight anyone can claim. What the circuit
-      // does not check is that non-identity keys are unique and come with proofs of
-      // possession — `verify_address_book` does that before a book is signed into the
-      // chain. See the crate-level "Trust boundary".
+      // an empty seat holds. Its secret key is the publicly known zero, so anyone can sign
+      // for such a seat, which is why the effective-weight step below strips its weight.
+      // What the circuit does not check is that non-identity keys are unique and come
+      // with proofs of possession — `verify_address_book` does that before a book is
+      // signed into the chain. See the crate-level "Trust boundary".
       point.check_on_curve(cs.namespace(|| format!("pk {i} on curve")))?;
 
       keys.push(point);

@@ -7,8 +7,8 @@
 //! on how many seats it happens to fill. Rotating the committee means
 //! producing a new address book that the outgoing one has jointly signed, and the IVC
 //! carries a proof that every rotation since genesis was authorised this way.
-//! Nonidentity public keys must be unique within a book. Sentinel keys may repeat;
-//! they are omitted from the signing rounds even when selected by the bitvector.
+//! Nonidentity public keys must be unique within a book. Sentinel keys may repeat, but
+//! a bitvector may not select them as signers.
 //!
 //! Use [`WRAPS`] with the public address-book, signing, and key types.
 //! Serialized proofs and verifier keys use `Vec<u8>`.

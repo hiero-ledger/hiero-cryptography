@@ -195,7 +195,8 @@ public class WRAPSLibraryBridge {
 
     /**
      * Returns the deterministic sentinel (aka placeholder) Schnorr public key.
-     * The corresponding private key is unknown and cannot be obtained by design.
+     * It is the point at infinity, whose private key is the publicly known zero, so its
+     * seat carries no weight and may not be selected as a signer.
      * @return the bytes of the sentinel Schnorr public key.
      */
     public native byte[] provideSentinelPublicKey();

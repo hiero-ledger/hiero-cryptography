@@ -3,7 +3,7 @@
 use std::any::Any;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JObject};
+use jni::objects::{JByteArray, JObject, JObjectArray};
 use jni::sys::{jbyte, jbyteArray};
 use crate::errors::HinTSError;
 use crate::hints::{serialize, RANDOM_SIZE};
@@ -49,6 +49,26 @@ pub fn u8_vec_to_jbyte_array(env: &JNIEnv, vec: &Vec<u8>) -> jbyteArray {
 pub fn two_u8_vec_to_jbyte_array(env: &JNIEnv, vec1: &Vec<u8>, vec2: &Vec<u8>) -> jbyteArray {
     let jbyte_vec = vec1.iter().chain(vec2.iter()).map(|&x| x as jbyte).collect();
     jbyte_vec_to_jbyte_array(env, &jbyte_vec)
+}
+
+/// Reads a Java byte[][] into a vector of Vec<u8> objects.
+/// # Arguments
+/// * `env` - The JNI environment.
+/// * `jarray` the Java array of byte arrays
+/// # Returns
+/// *   the byte arrays, or Err if the array or one of its elements is null or can't be read
+pub fn jbyte_arrays_to_u8_vecs(env: &mut JNIEnv, jarray: &JObjectArray) -> Result<Vec<Vec<u8>>, ()> {
+    let length = env.get_array_length(jarray).map_err(|_| ())?;
+    let mut vecs = Vec::with_capacity(length as usize);
+    for i in 0..length {
+        let element = JByteArray::from(env.get_object_array_element(jarray, i).map_err(|_| ())?);
+        let vec = env.convert_byte_array(&element);
+        // A native method may only hold a few local references at once (16 are guaranteed), and an array can
+        // have hundreds of elements, so release each one as soon as it's read.
+        let _ = env.delete_local_ref(element);
+        vecs.push(vec.map_err(|_| ())?);
+    }
+    Ok(vecs)
 }
 
 

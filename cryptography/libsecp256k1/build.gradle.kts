@@ -10,7 +10,10 @@ plugins {
     id("org.hiero.gradle.feature.benchmark")
 }
 
-testModuleInfo { requires("org.junit.jupiter.api") }
+testModuleInfo {
+    requires("org.bouncycastle.provider")
+    requires("org.junit.jupiter.api")
+}
 
 tasks.test {
     jvmArgs(

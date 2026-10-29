@@ -11,6 +11,7 @@ compile_error!("hinTS JNI entry points rely on catch_unwind, which is inert unde
 pub mod hints;
 pub mod jni_blst;
 pub mod jni_crs;
+pub mod jni_eth;
 pub mod jni_hints;
 pub mod setup;
 pub mod errors;

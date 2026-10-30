@@ -55,7 +55,7 @@ public record Secp256k1ECPrivateKey(byte[] secretKey) implements ECPrivateKey, D
 
     public Secp256k1ECPrivateKey {
         if (secretKey == null || secretKey.length != Libsecp256k1.SECRET_KEY_BYTES) {
-            throw new IllegalStateException("Expected a secret key of length " + Libsecp256k1.SECRET_KEY_BYTES
+            throw new IllegalArgumentException("Expected a secret key of length " + Libsecp256k1.SECRET_KEY_BYTES
                     + " , but got " + (secretKey == null ? "null" : ("" + secretKey.length)));
         }
     }

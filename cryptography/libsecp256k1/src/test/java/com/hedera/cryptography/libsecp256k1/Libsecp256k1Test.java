@@ -12,7 +12,7 @@ public class Libsecp256k1Test {
     private static final ContextualLibsecp256k1 INSTANCE = ContextualLibsecp256k1.getInstance();
 
     // A helper assertion that also prints entire arrays in addition to the default first mismatching index only
-    private void assertArrayEquals(byte[] expected, byte[] actual) {
+    public static void assertArrayEquals(byte[] expected, byte[] actual) {
         Assertions.assertArrayEquals(
                 expected,
                 actual,

@@ -49,4 +49,11 @@ public interface DerEncoder {
             }
         };
     }
+
+    /// Returns a new byte array with this DerEncoder value encoded.
+    default byte[] toByteArray() {
+        final DerOutputStream os = new DerOutputStream();
+        encode(os);
+        return os.toByteArray();
+    }
 }

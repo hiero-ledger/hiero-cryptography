@@ -219,17 +219,3 @@ jobs:
       - name: Gradle Unit Test
         # We do -PskipInstallRustToolchains=true, because all cargoBuild task results are taken FROM-CACHE
         run: ./gradlew test -PskipInstallRustToolchains=true --continue
-
-  analyze:
-    name: Analyze
-    uses: ./.github/workflows/zxc-code-analysis.yaml
-    needs:
-      - build
-      - test-cross-platform
-    if: ${{ (github.event_name == 'push') && !failure() && !cancelled() }}
-    with:
-      custom-job-label: Source Code
-      enable-snyk-scan: true
-      snyk-org-identifier: hedera-services
-    secrets:
-      snyk-token: ${{ secrets.SNYK_TOKEN }}

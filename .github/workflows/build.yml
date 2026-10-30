@@ -43,7 +43,7 @@ jobs:
     name: Build Rust - macOS
     needs:
       - read-build-targets
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}
     steps:
@@ -185,7 +185,7 @@ jobs:
     strategy:
       matrix:
         # removed windows from test as the windows build does not complete due to size of runner (2c/7gb RAM)
-        os: [macos-14]
+        os: [macos-15]
     runs-on: ${{ matrix.os }}
     env:
       HIERO_NATIVE_TARGETS: ${{ needs.read-build-targets.outputs.hiero-native-targets }}

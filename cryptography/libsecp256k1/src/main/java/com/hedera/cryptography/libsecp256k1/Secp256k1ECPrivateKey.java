@@ -47,15 +47,22 @@ public record Secp256k1ECPrivateKey(byte[] secretKey) implements ECPrivateKey, D
             new EllipticCurve(SECP256K1_FIELD, BigInteger.ZERO, new BigInteger("7"));
 
     /// Secp256k1 EC parameters.
-    public static final ECParameterSpec SEPC256K1_PARAMS =
+    public static final ECParameterSpec SECP256K1_PARAMS =
             new ECParameterSpec(SECP256K1_CURVE, SECP256K1_G, SECP256K1_CURVE_N, SECP256K1_H);
 
     private static final OID SECP256K1_CURVE_OID = new OID("1.3.132.0.10");
     private static final OID EC_PUBLIC_KEY_OID = new OID("1.2.840.10045.2.1");
 
+    public Secp256k1ECPrivateKey {
+        if (secretKey == null || secretKey.length != Libsecp256k1.SECRET_KEY_BYTES) {
+            throw new IllegalStateException("Expected a secret key of length " + Libsecp256k1.SECRET_KEY_BYTES
+                    + " , but got " + (secretKey == null ? "null" : ("" + secretKey.length)));
+        }
+    }
+
     @Override
     public ECParameterSpec getParams() {
-        return SEPC256K1_PARAMS;
+        return SECP256K1_PARAMS;
     }
 
     @Override

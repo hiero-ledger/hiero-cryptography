@@ -67,4 +67,31 @@ public class Libsecp256k1Test {
                         MemorySegment.ofArray(pk), MemorySegment.ofArray(Arrays.copyOf(output, 33)), 33));
         assertArrayEquals(Constants.PK, pk);
     }
+
+    @Test
+    void testRecId() throws Throwable {
+        byte[] recSig = new byte[Libsecp256k1.RECOVERABLE_SIGNATURE_BYTES];
+        byte[] compactSig = new byte[Libsecp256k1.SIGNATURE_BYTES];
+
+        // Bad cases. Make sure an error code is returned and JVM continues to run.
+        assertEquals(
+                0,
+                INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                        MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), -1));
+        assertEquals(
+                0,
+                INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                        MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), 4));
+
+        // Good cases. Note that the return value can still be 0 because the input signature is all zeros.
+        // We just want to ensure the VM doesn't abort.
+        INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), 0);
+        INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), 1);
+        INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), 2);
+        INSTANCE.secp256k1EcdsaRecoverableSignatureParseCompact(
+                MemorySegment.ofArray(recSig), MemorySegment.ofArray(compactSig), 3);
+    }
 }

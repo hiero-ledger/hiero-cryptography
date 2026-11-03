@@ -23,6 +23,8 @@ public class WRAPSLibraryBridgeTest {
 
     private static final int UNCOMPRESSED_PROOF_SIZE_BYTES = 3076656;
     private static final int COMPRESSED_PROOF_SIZE_BYTES = 11368;
+    private static final int LEDGER_ID_SIZE_BYTES = 64;
+    private static final int HINTS_VK_SIZE_BYTES = 1096;
 
     // We use ABs with 4 and 5 entries, so 8 should be good.
     private static final int SIGNERS_NUM = 8;
@@ -190,7 +192,7 @@ public class WRAPSLibraryBridgeTest {
                 Node.from(Constants.SEED_1, 0, 1),
                 Node.from(Constants.SEED_2, 100, 2)));
 
-        byte[] hintsVK = new byte[1096];
+        byte[] hintsVK = new byte[HINTS_VK_SIZE_BYTES];
         final byte[] message =
                 WRAPS.computeNetworkID(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
 
@@ -262,7 +264,7 @@ public class WRAPSLibraryBridgeTest {
 
         final Node node = network.nodes().get(0);
 
-        byte[] hintsVK = new byte[1096];
+        byte[] hintsVK = new byte[HINTS_VK_SIZE_BYTES];
         final byte[] message =
                 WRAPS.computeNetworkID(network.publicKeys(), network.weights(), network.nodeIds(), hintsVK);
 
@@ -878,7 +880,7 @@ public class WRAPSLibraryBridgeTest {
         final byte[] genesisAddressBookHash =
                 WRAPS.hashAddressBook(genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds());
 
-        final byte[] dummyHintsKey = new byte[1096];
+        final byte[] dummyHintsKey = new byte[HINTS_VK_SIZE_BYTES];
 
         final byte[] ledgerID = WRAPS.computeNetworkID(
                 genesisNetwork.publicKeys(), genesisNetwork.weights(), genesisNetwork.nodeIds(), dummyHintsKey);
@@ -902,6 +904,9 @@ public class WRAPSLibraryBridgeTest {
 
         // Note: the compressed proof is non-deterministic, so we can only check the size, and then verify it:
         assertTrue(WRAPS.verifyCompressedProof(proof0.compressed(), ledgerID, dummyHintsKey));
+
+        // Also verify the uncompressed proof:
+        assertTrue(WRAPS.verifyUncompressedProof(proof0.uncompressed(), ledgerID, dummyHintsKey));
 
         // Now let's test a rotated AddressBook.
         final Network nextNetwork = new Network(List.of(
@@ -939,6 +944,7 @@ public class WRAPSLibraryBridgeTest {
         assertEquals(UNCOMPRESSED_PROOF_SIZE_BYTES, proof1.uncompressed().length);
         assertEquals(COMPRESSED_PROOF_SIZE_BYTES, proof1.compressed().length);
         assertTrue(WRAPS.verifyCompressedProof(proof1.compressed(), ledgerID, hintsKeys.verificationKey()));
+        assertTrue(WRAPS.verifyUncompressedProof(proof1.uncompressed(), ledgerID, hintsKeys.verificationKey()));
     }
 
     @Test
@@ -1229,5 +1235,20 @@ public class WRAPSLibraryBridgeTest {
         assertFalse(WRAPS.verifyCompressedProof(new byte[] {0}, new byte[0], new byte[] {0}));
         assertFalse(WRAPS.verifyCompressedProof(new byte[] {0}, new byte[] {0}, null));
         assertFalse(WRAPS.verifyCompressedProof(new byte[] {0}, new byte[] {0}, new byte[0]));
+    }
+
+    @Test
+    public void testVerifyUncompressedProofConstraints() {
+        assertFalse(WRAPS.verifyUncompressedProof(null, new byte[LEDGER_ID_SIZE_BYTES], new byte[HINTS_VK_SIZE_BYTES]));
+        assertFalse(WRAPS.verifyUncompressedProof(
+                new byte[0], new byte[LEDGER_ID_SIZE_BYTES], new byte[HINTS_VK_SIZE_BYTES]));
+        assertFalse(WRAPS.verifyUncompressedProof(
+                new byte[UNCOMPRESSED_PROOF_SIZE_BYTES], null, new byte[HINTS_VK_SIZE_BYTES]));
+        assertFalse(WRAPS.verifyUncompressedProof(
+                new byte[UNCOMPRESSED_PROOF_SIZE_BYTES], new byte[0], new byte[HINTS_VK_SIZE_BYTES]));
+        assertFalse(WRAPS.verifyUncompressedProof(
+                new byte[UNCOMPRESSED_PROOF_SIZE_BYTES], new byte[LEDGER_ID_SIZE_BYTES], null));
+        assertFalse(WRAPS.verifyUncompressedProof(
+                new byte[UNCOMPRESSED_PROOF_SIZE_BYTES], new byte[LEDGER_ID_SIZE_BYTES], new byte[0]));
     }
 }

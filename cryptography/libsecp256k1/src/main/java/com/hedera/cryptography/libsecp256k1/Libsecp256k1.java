@@ -458,6 +458,9 @@ public final class Libsecp256k1 {
             if (input64.byteSize() != 64) {
                 return 0;
             }
+            if (recid < 0 || recid > 3) {
+                return 0;
+            }
             return secp256k1EcdsaRecoverableSignatureParseCompactNoChecks(context, sig, input64, recid);
         } catch (Throwable t) {
             throw new Libsecp256k1Exception(t);

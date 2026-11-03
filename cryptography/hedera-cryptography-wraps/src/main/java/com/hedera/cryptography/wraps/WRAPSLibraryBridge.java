@@ -23,6 +23,7 @@ public class WRAPSLibraryBridge {
     /** The max theoretical sum of weights all nodes together can have, which is 2^63-1 because we use signed long. */
     private static final long MAX_SUM_OF_WEIGHTS = Long.MAX_VALUE;
 
+    private static final int UNCOMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 3076656;
     private static final int COMPRESSED_WRAPS_PROOF_LENGTH_BYTES = 11368;
     private static final int LEDGER_ID_LENGTH_BYTES = 64;
     private static final int TSS_VERIFICATION_KEY_LENGTH_BYTES = 1096;
@@ -619,6 +620,37 @@ public class WRAPSLibraryBridge {
 
     private native boolean verifyCompressedProofImpl(
             byte[] compressedProof, byte[] ledgerId, byte[] tssVerificationKey);
+
+    /**
+     * Checks an uncompressed WRAPS proof. Note that `isProofSupported()` must return `true`
+     * for this operation to be supported.
+     * <p>
+     * Note: Nova and Decider keys are managed internally in the native code for performance reasons.
+     *
+     * @param uncompressedProof Uncompressed proof bundle returned by `constructWrapsProof()`
+     * @param ledgerId ledgerID as computed by `computeNetworkID()`
+     * @param tssVerificationKey hinTS VerificationKey, or 1096 zeros for the initial proof
+     * @return true if the decider successfully verifies the proof, false if not or if errors occur
+     */
+    public boolean verifyUncompressedProof(byte[] uncompressedProof, byte[] ledgerId, byte[] tssVerificationKey) {
+        // The uncompressedProof verification uses the whole PublicParams, so we check isProofSupported
+        // instead of isVerificationSupported:
+        if (!isProofSupported()) {
+            return false;
+        }
+        if (ledgerId == null
+                || ledgerId.length != LEDGER_ID_LENGTH_BYTES
+                || tssVerificationKey == null
+                || tssVerificationKey.length != TSS_VERIFICATION_KEY_LENGTH_BYTES
+                || uncompressedProof == null
+                || uncompressedProof.length != UNCOMPRESSED_WRAPS_PROOF_LENGTH_BYTES) {
+            return false;
+        }
+        return verifyUncompressedProofImpl(uncompressedProof, ledgerId, tssVerificationKey);
+    }
+
+    private native boolean verifyUncompressedProofImpl(
+            byte[] uncompressedProof, byte[] ledgerId, byte[] tssVerificationKey);
 
     /** Check if the sum of weights doesn't exceed MAX_SUM_OF_WEIGHTS. */
     private static boolean validateWeightsSum(final long weights[]) {

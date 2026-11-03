@@ -433,3 +433,41 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
         }
     })).unwrap_or_else(|_| jboolean::from(false))
 }
+
+/// JNI for WRAPSLibraryBridge.verifyUncompressedProofImpl
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBridge_verifyUncompressedProofImpl(
+    env: JNIEnv,
+    _instance: JObject,
+    uncompressed_proof_jarray: JByteArray,
+    ledger_id_jarray: JByteArray,
+    tss_vk_jarray: JByteArray,
+) -> jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let ledger_id_vec: Vec<u8> = match env.convert_byte_array(&ledger_id_jarray) {
+            Ok(val) => val,
+            Err(_) => return jboolean::from(false)
+        };
+
+        let tss_vk_vec: Vec<u8> = match env.convert_byte_array(&tss_vk_jarray) {
+            Ok(val) => val,
+            Err(_) => return jboolean::from(false)
+        };
+
+        let uncompressed_proof = match env.convert_byte_array(&uncompressed_proof_jarray) {
+            Ok(val) => val,
+            Err(_) => return jboolean::from(false)
+        };
+
+        let option_option_params = PUBLIC_PARAMS.get();
+        if option_option_params.is_none() || option_option_params.unwrap().is_none() {
+            return jboolean::from(false);
+        }
+        let public_params = option_option_params.unwrap().as_ref().unwrap();
+
+        match WRAPS::verify_uncompressed_wraps_proof(public_params, &uncompressed_proof, &ledger_id_vec, tss_vk_vec) {
+            Ok(val) => jboolean::from(val),
+            Err(_) => return jboolean::from(false)
+        }
+    })).unwrap_or_else(|_| jboolean::from(false))
+}

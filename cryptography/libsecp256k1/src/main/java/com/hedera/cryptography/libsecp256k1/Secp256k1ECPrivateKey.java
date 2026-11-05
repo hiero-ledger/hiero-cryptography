@@ -53,6 +53,16 @@ public record Secp256k1ECPrivateKey(byte[] secretKey) implements ECPrivateKey, D
     private static final OID SECP256K1_CURVE_OID = new OID("1.3.132.0.10");
     private static final OID EC_PUBLIC_KEY_OID = new OID("1.2.840.10045.2.1");
 
+    private record DerAlgorithm() implements DerEncoder {
+        @Override
+        public void emit(DerOutputStream os) {
+            EC_PUBLIC_KEY_OID.encode(os);
+            SECP256K1_CURVE_OID.encode(os);
+        }
+    }
+
+    static final DerEncoder SECP256K1_ALGORITHM_IDENTIFIER = new DerAlgorithm();
+
     public Secp256k1ECPrivateKey {
         if (secretKey == null || secretKey.length != Libsecp256k1.SECRET_KEY_BYTES) {
             throw new IllegalArgumentException("Expected a secret key of length " + Libsecp256k1.SECRET_KEY_BYTES
@@ -95,20 +105,12 @@ public record Secp256k1ECPrivateKey(byte[] secretKey) implements ECPrivateKey, D
         }
     }
 
-    private record DerAlgorithm() implements DerEncoder {
-        @Override
-        public void emit(DerOutputStream os) {
-            EC_PUBLIC_KEY_OID.encode(os);
-            SECP256K1_CURVE_OID.encode(os);
-        }
-    }
-
     /// Emit a PKCS#8 PrivateKeyInfo for this key. The PrivateKey.getEncoded() is a useful
     /// shortcut to get this value.
     @Override
     public void emit(DerOutputStream os) {
         DerWriter.putInteger(os, (byte) 0);
-        new DerAlgorithm().encode(os);
+        SECP256K1_ALGORITHM_IDENTIFIER.encode(os);
         DerEncoder.wrap(DerWriter.TAG_OCTET_STRING, new DerSec1PrivateKey(this)).encode(os);
     }
 }

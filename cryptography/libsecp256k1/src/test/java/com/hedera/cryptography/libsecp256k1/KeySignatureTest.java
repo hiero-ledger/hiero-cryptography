@@ -48,9 +48,8 @@ public class KeySignatureTest {
 
         final PrivateKey bcPrivateKey;
         final ECPublicKey bcPublicKey;
-        ECNamedCurveParameterSpec spec;
         {
-            /*ECNamedCurveParameterSpec */ spec = ECNamedCurveTable.getParameterSpec("secp256k1");
+            ECNamedCurveParameterSpec spec = ECNamedCurveTable.getParameterSpec("secp256k1");
             BigInteger d = new BigInteger(1, Constants.SK);
             org.bouncycastle.jce.spec.ECPrivateKeySpec privateKeySpec =
                     new org.bouncycastle.jce.spec.ECPrivateKeySpec(d, spec);

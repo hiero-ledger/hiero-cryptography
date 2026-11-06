@@ -147,8 +147,8 @@ pub fn build_address_book(
 }
 
 /// Converts a JBooleanArray into a Vec<bool>
-pub fn jboolean_array_to_vec(env: &JNIEnv, boolean_jarray: JBooleanArray) -> Result<Vec<bool>, ()> {
-    let num = match env.get_array_length(&boolean_jarray) {
+pub fn jboolean_array_to_vec(env: &JNIEnv, boolean_jarray: &JBooleanArray) -> Result<Vec<bool>, ()> {
+    let num = match env.get_array_length(boolean_jarray) {
         Ok(len) => len as usize,
         Err(_) => return Result::Err(())
     };

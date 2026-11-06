@@ -15,6 +15,7 @@ import java.security.Provider;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.Signature;
+import java.security.interfaces.ECPublicKey;
 import java.util.Arrays;
 import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -46,7 +47,7 @@ public class KeySignatureTest {
         // Finally, it verifies all the signatures using both BC and Lib.
 
         final PrivateKey bcPrivateKey;
-        final PublicKey bcPublicKey;
+        final ECPublicKey bcPublicKey;
         {
             ECNamedCurveParameterSpec spec = ECNamedCurveTable.getParameterSpec("secp256k1");
             BigInteger d = new BigInteger(1, Constants.SK);
@@ -57,18 +58,40 @@ public class KeySignatureTest {
 
             org.bouncycastle.math.ec.ECPoint q = spec.getG().multiply(d);
             org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(q, spec);
-            bcPublicKey = factory.generatePublic(pubSpec);
+            bcPublicKey = (ECPublicKey) factory.generatePublic(pubSpec);
         }
 
-        final Secp256k1ECPrivateKey privateKey = new Secp256k1ECPrivateKey(Constants.SK);
+        final Secp256k1ECPrivateKey ourPrivateKey = new Secp256k1ECPrivateKey(Constants.SK);
         final byte[] publicKeyBytes = new byte[Libsecp256k1.PUBLIC_KEY_BYTES];
         assertEquals(
                 1,
                 LIBSECP256K1.secp256k1EcPubkeyCreate(
                         MemorySegment.ofArray(publicKeyBytes), MemorySegment.ofArray(Constants.SK)));
 
+        final Secp256k1ECPublicKey ourPublicKey;
+        {
+            byte[] portablePublicKeyBytes = new byte[Libsecp256k1.PUBLIC_KEY_BYTES + 1];
+            long[] length = new long[] {portablePublicKeyBytes.length};
+            assertEquals(
+                    1,
+                    LIBSECP256K1.secp256k1EcPubkeySerialize(
+                            MemorySegment.ofArray(portablePublicKeyBytes),
+                            MemorySegment.ofArray(length),
+                            MemorySegment.ofArray(publicKeyBytes),
+                            Libsecp256k1.SECP256K1_EC_UNCOMPRESSED));
+
+            final byte[] portableKey = Arrays.copyOfRange(portablePublicKeyBytes, 1, portablePublicKeyBytes.length);
+            ourPublicKey = new Secp256k1ECPublicKey(portableKey);
+        }
+
+        // Ensure our and BC public keys are the same:
+        Libsecp256k1Test.assertArrayEquals(asRawEcdsaSecp256k1Key(bcPublicKey), ourPublicKey.publicKey());
+
         // Ensure the PrivateKey.getEncoded() is the same for our key and BC key:
-        Libsecp256k1Test.assertArrayEquals(bcPrivateKey.getEncoded(), privateKey.getEncoded());
+        Libsecp256k1Test.assertArrayEquals(bcPrivateKey.getEncoded(), ourPrivateKey.getEncoded());
+
+        // Also ensure that PublicKey.getEncoded() is the same for our key and BC key:
+        Libsecp256k1Test.assertArrayEquals(bcPublicKey.getEncoded(), ourPublicKey.getEncoded());
 
         byte[] bcSignerBCKeySignature;
         {
@@ -81,7 +104,7 @@ public class KeySignatureTest {
         byte[] bcSignerOurKeySignature;
         {
             final Signature ecdsaSign = Signature.getInstance("NONEwithECDSA", BOUNCYCASTLE_PROVIDER);
-            ecdsaSign.initSign(privateKey);
+            ecdsaSign.initSign(ourPrivateKey);
             ecdsaSign.update(MESSAGE);
             bcSignerOurKeySignature = ecdsaSign.sign();
         }
@@ -107,28 +130,18 @@ public class KeySignatureTest {
         // values. But we can verify every signature using both BC and our library:
 
         {
-            Signature verify = Signature.getInstance("NONEwithECDSA", BOUNCYCASTLE_PROVIDER);
-            verify.initVerify(bcPublicKey);
-            verify.update(MESSAGE);
-            assertTrue(verify.verify(bcSignerBCKeySignature));
-
+            verifyWithBouncyCastle(bcSignerBCKeySignature, bcPublicKey);
+            verifyWithBouncyCastle(bcSignerBCKeySignature, ourPublicKey);
             assertEquals(1, verifyWithLibsecp256k1(rawEcdsaSigFromAsn1Der(bcSignerBCKeySignature), publicKeyBytes));
         }
 
         {
-            Signature verify = Signature.getInstance("NONEwithECDSA", BOUNCYCASTLE_PROVIDER);
-            verify.initVerify(bcPublicKey);
-            verify.update(MESSAGE);
-            assertTrue(verify.verify(bcSignerOurKeySignature));
-
+            verifyWithBouncyCastle(bcSignerOurKeySignature, bcPublicKey);
+            verifyWithBouncyCastle(bcSignerOurKeySignature, ourPublicKey);
             assertEquals(1, verifyWithLibsecp256k1(rawEcdsaSigFromAsn1Der(bcSignerOurKeySignature), publicKeyBytes));
         }
 
         {
-            Signature verify = Signature.getInstance("NONEwithECDSA", BOUNCYCASTLE_PROVIDER);
-            verify.initVerify(bcPublicKey);
-            verify.update(MESSAGE);
-
             // BC uses DER-encoded signatures, so we prepare it here:
             byte[] derSignature;
             {
@@ -148,8 +161,8 @@ public class KeySignatureTest {
                 derSignature = new DerSignature(ourSignerOurKeySignature).toByteArray();
             }
 
-            assertTrue(verify.verify(derSignature));
-
+            verifyWithBouncyCastle(derSignature, bcPublicKey);
+            verifyWithBouncyCastle(derSignature, ourPublicKey);
             assertEquals(1, verifyWithLibsecp256k1(ourSignerOurKeySignature, publicKeyBytes));
         }
     }
@@ -171,6 +184,13 @@ public class KeySignatureTest {
                 MemorySegment.ofArray(nativeSignature),
                 MemorySegment.ofArray(MESSAGE),
                 MemorySegment.ofArray(publicKeyBytes));
+    }
+
+    private static void verifyWithBouncyCastle(byte[] bcDerSignature, PublicKey publicKey) throws Exception {
+        Signature verify = Signature.getInstance("NONEwithECDSA", BOUNCYCASTLE_PROVIDER);
+        verify.initVerify(publicKey);
+        verify.update(MESSAGE);
+        assertTrue(verify.verify(bcDerSignature));
     }
 
     /// Parse a BC-native DER-encoded signature into a raw EcDSA signature.
@@ -200,5 +220,11 @@ public class KeySignatureTest {
         System.arraycopy(derSig, sStart, rawBytes, 32 + (32 - finalSLen), Math.min(32, origSLen));
 
         return rawBytes;
+    }
+
+    /// Borrowed from Hiero Consensus Node repository.
+    private static byte[] asRawEcdsaSecp256k1Key(final ECPublicKey cryptoPubKey) {
+        final byte[] encPubKey = cryptoPubKey.getEncoded();
+        return Arrays.copyOfRange(encPubKey, encPubKey.length - Libsecp256k1.PUBLIC_KEY_BYTES, encPubKey.length);
     }
 }

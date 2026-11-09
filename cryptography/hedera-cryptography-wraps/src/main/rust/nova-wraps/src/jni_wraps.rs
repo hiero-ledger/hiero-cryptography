@@ -210,11 +210,6 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             }
         };
 
-        match update_valid_messages(&valid_messages) {
-            Ok(()) => (),
-            Err(_) => return std::ptr::null_mut()
-        };
-
         match obj {
             SigningProtocolObject::ProtocolMessage(msg_encoded) => jni_util::serialize_to_jbyte_array(&env, &msg_encoded),
             SigningProtocolObject::ProtocolOutput(signature) => jni_util::serialize_to_jbyte_array(&env, &signature)

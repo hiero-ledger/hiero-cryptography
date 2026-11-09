@@ -6,7 +6,7 @@ use jni::objects::{JByteArray, JObject, JObjectArray, JValue, JLongArray, JBoole
 use std::sync::OnceLock;
 //use nova_snark::frontend::Assignment;
 
-use crate::{jni_util, WRAPS, SigningProtocolPhase, ENTROPY_SIZE, SigningProtocolMessage, SigningProtocolObject, SchnorrMultiSignature, AddressBook, AddressBookHash, SchnorrSecretKey, E2, HintsVKHash, PublicParams, CompressedVerifyingKey};
+use crate::{jni_util, WrapsError, WRAPS, SigningProtocolPhase, ENTROPY_SIZE, SigningProtocolMessage, SigningProtocolObject, SchnorrMultiSignature, AddressBook, AddressBookHash, SchnorrSecretKey, E2, HintsVKHash, PublicParams, CompressedVerifyingKey};
 use crate::jni_util::deserialize_from_jbyte_array;
 
 //const SECRET_KEY_LENGTH: usize = 32;
@@ -189,7 +189,7 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
             Err(_) => return std::ptr::null_mut()
         };
 
-        let update_valid_messages = || {
+        let update_valid_messages = |valid_messages: &[bool]| {
             let mut jboolean_vec: Vec<jboolean> = vec![0; valid_messages.len()];
             for i in 0..jboolean_vec.len() {
                 jboolean_vec[i] = if valid_messages[i] { jni::sys::JNI_TRUE } else { jni::sys::JNI_FALSE };
@@ -199,14 +199,18 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_wraps_WRAPSLibraryBri
 
         let obj: SigningProtocolObject<E2> = match WRAPS::signing_protocol(phase, random_arr, message, signing_key.as_ref(), &ab, &signers, &round1messages, &round2messages, &round3messages) {
             Ok(val) => val,
-            Err(_) => {
+            Err(err) => {
+                let flags = match &err {
+                    WrapsError::InvalidMessages { valid_messages: detected_flags } => detected_flags,
+                    _ => &valid_messages,
+                };
                 // Ignore the Result by design because we're reporting an error in this branch unconditionally.
-                let _ = update_valid_messages();
+                let _ = update_valid_messages(flags);
                 return std::ptr::null_mut();
             }
         };
 
-        match update_valid_messages() {
+        match update_valid_messages(&valid_messages) {
             Ok(()) => (),
             Err(_) => return std::ptr::null_mut()
         };

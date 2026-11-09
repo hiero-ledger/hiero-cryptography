@@ -228,8 +228,16 @@ public class WRAPSLibraryBridge {
      * @param round3Messages Messages collected from prior rounds.
      * @param validMessages an output boolean array that the caller must initialize with all `true`.
      *                      The method will mark entries as `false` if it detects an invalid round message
-     *                      from a participant at that index. The array must have the same size
-     *                      as the AddressBook (e.g. same as the `signers` array above.)
+     *                      from the signer at that round-message index. The array must have one entry
+     *                      per `true` in `signers`, in the same order as the round messages.
+     *                      For R1, which consumes no round messages, the array must be empty.
+     *                      The flags identify offenders detected by this call: `false` marks a detected
+     *                      offender; `true` means not flagged. Validation stops at the first failing stage:
+     *                      decoding, commitment openings, then partial signatures. An offender whose
+     *                      invalid message would be caught by a later stage can therefore still have a
+     *                      `true` entry. For example, a decoding failure prevents partial-signature checks,
+     *                      leaving signers with invalid partial signatures unflagged.
+     *                      Therefore, this array only identifies a subset of offenders.
      * @return either a round message for R1...R3, or a signature for Aggregate
      */
     public byte[] runSigningProtocolPhase(
@@ -284,9 +292,6 @@ public class WRAPSLibraryBridge {
         if (signers.length != schnorrPublicKeys.length) {
             return null;
         }
-        if (validMessages.length != signers.length) {
-            return null;
-        }
         for (boolean validMessage : validMessages) {
             if (!validMessage) {
                 return null;
@@ -307,6 +312,9 @@ public class WRAPSLibraryBridge {
                 }
                 numOfActualSigners++;
             }
+        }
+        if (validMessages.length != numOfActualSigners) {
+            return null;
         }
         if (schnorrPublicKeys.length != 0 && numOfActualSigners > schnorrPublicKeys.length) {
             return null;

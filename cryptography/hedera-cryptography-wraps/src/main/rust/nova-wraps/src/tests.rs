@@ -1106,10 +1106,9 @@ fn signing_protocol_rejects_a_nonce_that_does_not_open_its_commitment() {
     &round2,
   )
   .unwrap_err();
-  assert!(
-    format!("{err}").contains("signer 1"),
-    "the faulty signer should be named, got: {err}"
-  );
+  let mut valid_messages = vec![true; n];
+  valid_messages[1] = false;
+  assert_eq!(err, WrapsError::InvalidMessages { valid_messages });
 }
 
 #[test]
@@ -1166,10 +1165,9 @@ fn one_seed_per_instance_spans_all_three_rounds() {
     &divergent,
   )
   .unwrap_err();
-  assert!(
-    format!("{err}").contains("signer 0"),
-    "expected signer 0's opening to fail, got: {err}"
-  );
+  let mut valid_messages = vec![true; n];
+  valid_messages[0] = false;
+  assert_eq!(err, WrapsError::InvalidMessages { valid_messages });
 
   // Reusing both the seed and message repeats the nonce, so callers must still use
   // fresh entropy for each instance even though distinct messages now separate nonces.
@@ -1333,20 +1331,25 @@ fn signing_protocol_rejects_malformed_or_wrong_round_bytes() {
       vec![255; 4],
       f.rounds[(round + 1) % 3][0].clone(),
     ] {
-      let mut histories = f.rounds.clone();
-      histories[round][0] = malformed;
-      for future in histories.iter_mut().skip(round + 1) {
-        future.clear();
+      for signer in 0..2 {
+        let mut histories = f.rounds.clone();
+        histories[round][signer] = malformed.clone();
+        for future in histories.iter_mut().skip(round + 1) {
+          future.clear();
+        }
+        let mut expected = vec![true; f.rounds[round].len()];
+        expected[signer] = false;
+        assert_eq!(
+          invalid_message_flags(f.call(
+            phase,
+            (phase != Aggregate).then_some(f.seeds[0]),
+            (phase == R3).then_some(&f.keys[0]),
+            [&histories[0], &histories[1], &histories[2]],
+          )),
+          expected,
+          "{phase:?}, signer {signer}"
+        );
       }
-      assert!(matches!(
-        f.call(
-          phase,
-          (phase != Aggregate).then_some(f.seeds[0]),
-          (phase == R3).then_some(&f.keys[0]),
-          [&histories[0], &histories[1], &histories[2]],
-        ),
-        Err(WrapsError::InvalidInput(_))
-      ));
     }
   }
 
@@ -1365,8 +1368,13 @@ fn signing_protocol_rejects_malformed_or_wrong_round_bytes() {
     vec![255; 64],
   ] {
     for (index, phase) in [R1, R2, R3, Aggregate].into_iter().enumerate() {
-      let histories: [&[SigningProtocolMessage]; 3] =
-        core::array::from_fn(|round| if round < index { &f.rounds[round][..] } else { &[] });
+      let histories: [&[SigningProtocolMessage]; 3] = core::array::from_fn(|round| {
+        if round < index {
+          &f.rounds[round][..]
+        } else {
+          &[]
+        }
+      });
       assert!(matches!(
         WRAPS::signing_protocol(
           phase,
@@ -1389,20 +1397,34 @@ fn signing_protocol_rejects_malformed_or_wrong_round_bytes() {
   }
 }
 
+fn invalid_message_flags(result: Result<SigningProtocolObject<E2>, WrapsError>) -> Vec<bool> {
+  match result {
+    Err(WrapsError::InvalidMessages { valid_messages }) => valid_messages,
+    other => panic!("expected an attributed message failure, got {other:?}"),
+  }
+}
+
 #[test]
 fn signing_protocol_checks_membership_openings_and_each_share() {
   use SigningProtocolPhase::{Aggregate, R2, R3};
   let f = SigningFixture::new();
   let r3_histories = [&f.rounds[0][..], &f.rounds[1][..], &[]];
-  assert!(f
-    .call(R2, Some([99; ENTROPY_SIZE]), None, [&f.rounds[0], &[], &[]])
-    .is_err());
-  assert!(f
-    .call(R3, Some([99; ENTROPY_SIZE]), Some(&f.keys[0]), r3_histories)
-    .is_err());
-  assert!(f
-    .call(R3, Some(f.seeds[0]), Some(&f.keys[1]), r3_histories)
-    .is_err());
+  // Local entropy/key mistakes do not establish that any peer sent a bad message.
+  for result in [
+    f.call(R2, Some([99; ENTROPY_SIZE]), None, [&f.rounds[0], &[], &[]]),
+    f.call(R3, Some([99; ENTROPY_SIZE]), Some(&f.keys[0]), r3_histories),
+    f.call(R3, Some(f.seeds[0]), Some(&f.keys[1]), r3_histories),
+    f.call(R3, None, Some(&f.keys[0]), r3_histories),
+    f.call(R3, Some(f.seeds[0]), None, r3_histories),
+    f.call(
+      Aggregate,
+      None,
+      None,
+      [&f.rounds[0][..1], &f.rounds[1], &f.rounds[2]],
+    ),
+  ] {
+    assert!(matches!(result, Err(WrapsError::InvalidInput(_))));
+  }
 
   // Even consistent openings cannot be reassigned to different selected keys.
   let mut swapped = f.rounds.clone();
@@ -1426,8 +1448,8 @@ fn signing_protocol_checks_membership_openings_and_each_share() {
   commitment.nonce_commitment[0] ^= 1;
   wrong_commitment[0] = encode(&RoundMessage::<E2>::Round1(commitment)).unwrap();
   for phase in [R3, Aggregate] {
-    assert!(f
-      .call(
+    assert_eq!(
+      invalid_message_flags(f.call(
         phase,
         (phase == R3).then_some(f.seeds[0]),
         (phase == R3).then_some(&f.keys[0]),
@@ -1440,8 +1462,9 @@ fn signing_protocol_checks_membership_openings_and_each_share() {
             &[]
           }
         ],
-      )
-      .is_err());
+      )),
+      vec![false, true]
+    );
   }
 
   let RoundMessage::Round3(share) = decode::<RoundMessage<E2>>(&f.rounds[2][0]).unwrap() else {
@@ -1456,16 +1479,157 @@ fn signing_protocol_checks_membership_openings_and_each_share() {
     }
     let mut shares = f.rounds[2].clone();
     shares[0] = encode(&RoundMessage::<E2>::Round3(corrupt)).unwrap();
-    assert!(f
-      .call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares])
-      .is_err());
+    assert_eq!(
+      invalid_message_flags(f.call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares])),
+      vec![false, true]
+    );
   }
   // Swapping valid shares leaves their sum unchanged, but each must match its seat.
   let mut shares = f.rounds[2].clone();
   shares.swap(0, 1);
-  assert!(f
-    .call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares])
-    .is_err());
+  assert_eq!(
+    invalid_message_flags(f.call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares])),
+    vec![false, false]
+  );
+}
+
+#[test]
+fn signing_protocol_reports_multiple_invalid_senders() {
+  use SigningProtocolPhase::{Aggregate, R3};
+  let f = SigningFixture::new();
+
+  // Decode all supplied rounds before rejecting, including different bad senders
+  // in different rounds. Flags include only the two selected signers.
+  for first_round in 0..3 {
+    for second_round in 0..3 {
+      let mut rounds = f.rounds.clone();
+      rounds[first_round][0].clear();
+      rounds[second_round][1] = f.rounds[(second_round + 1) % 3][1].clone();
+      assert_eq!(
+        invalid_message_flags(f.call(Aggregate, None, None, [&rounds[0], &rounds[1], &rounds[2]])),
+        vec![false, false]
+      );
+    }
+  }
+
+  // Both decoded openings fail, so neither R3 nor aggregation may stop after
+  // finding the first invalid sender. Flags follow the round-message order.
+  let mut openings = f.rounds[1].clone();
+  openings.swap(0, 1);
+  for phase in [R3, Aggregate] {
+    assert_eq!(
+      invalid_message_flags(f.call(
+        phase,
+        (phase == R3).then_some(f.seeds[0]),
+        (phase == R3).then_some(&f.keys[0]),
+        [
+          &f.rounds[0],
+          &openings,
+          if phase == Aggregate {
+            &f.rounds[2]
+          } else {
+            &[]
+          }
+        ],
+      )),
+      vec![false, false]
+    );
+  }
+
+  // Different partial-signature failures are collected together.
+  let mut shares = f.rounds[2].clone();
+  for (i, bytes) in shares.iter_mut().enumerate() {
+    let RoundMessage::Round3(mut share) = decode::<RoundMessage<E2>>(bytes).unwrap() else {
+      unreachable!()
+    };
+    if i == 0 {
+      share.partial_signature.e += Base::ONE;
+    } else {
+      share.partial_signature.s += SchnorrResponse::<E2>::ONE;
+    }
+    *bytes = encode(&RoundMessage::<E2>::Round3(share)).unwrap();
+  }
+  assert_eq!(
+    invalid_message_flags(f.call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares])),
+    vec![false, false]
+  );
+}
+
+#[test]
+fn signing_protocol_can_retry_without_an_invalid_sender() {
+  use SigningProtocolPhase::Aggregate;
+  let mut f = SigningFixture::new();
+  // The surviving signer has sufficient voting weight to finish the rotation.
+  f.book[0].2 = 3;
+  let mut shares = f.rounds[2].clone();
+  let RoundMessage::Round3(mut share) = decode::<RoundMessage<E2>>(&shares[1]).unwrap() else {
+    unreachable!()
+  };
+  share.partial_signature.s += SchnorrResponse::<E2>::ONE;
+  shares[1] = encode(&RoundMessage::<E2>::Round3(share)).unwrap();
+  let valid_messages =
+    invalid_message_flags(f.call(Aggregate, None, None, [&f.rounds[0], &f.rounds[1], &shares]));
+  assert_eq!(valid_messages, vec![true, false]);
+  let mut valid_signers = valid_messages.into_iter();
+  let retry_bits = BitVector::from(core::array::from_fn(|i| {
+    f.bits[i] && valid_signers.next().expect("one flag per selected signer")
+  }));
+  assert!(valid_signers.next().is_none());
+  // threshold_sign draws fresh session entropy for every retry; keeping the old
+  // entropy with a changed signing subset would reuse a Schnorr nonce.
+  let signature = threshold_sign(&f.message, &f.book, &f.keys, &retry_bits);
+  assert_eq!(signature.0, retry_bits);
+  assert!(WRAPS::verify_signature(&f.book, &f.message, &signature).unwrap());
+}
+
+#[test]
+fn signing_protocol_decodes_messages_before_checking_openings() {
+  use SigningProtocolPhase::{Aggregate, R3};
+  let f = SigningFixture::new();
+  let mut rounds = f.rounds.clone();
+  let RoundMessage::Round2(mut opening) = decode::<RoundMessage<E2>>(&rounds[1][1]).unwrap()
+  else {
+    unreachable!()
+  };
+  opening.nonce_point = opening.nonce_point + <E2 as Engine>::GE::gen();
+  rounds[1][1] = encode(&RoundMessage::<E2>::Round2(opening)).unwrap();
+
+  // The changed opening would change everyone's shared challenge. The original
+  // honest shares must not be blamed for disagreeing with that invalid transcript.
+  assert_eq!(
+    invalid_message_flags(f.call(Aggregate, None, None, [&rounds[0], &rounds[1], &rounds[2]])),
+    vec![true, false]
+  );
+
+  // Malformed messages are reported before cryptographic checks, so a bad
+  // opening in the same transcript is not attributed until decoding succeeds.
+  for malformed_round in 0..3 {
+    let mut mixed = rounds.clone();
+    mixed[malformed_round][0].clear();
+    for phase in [R3, Aggregate] {
+      if phase == R3 && malformed_round == 2 {
+        continue;
+      }
+      assert_eq!(
+        invalid_message_flags(f.call(
+          phase,
+          (phase == R3).then_some(f.seeds[0]),
+          (phase == R3).then_some(&f.keys[0]),
+          [
+            &mixed[0],
+            &mixed[1],
+            if phase == Aggregate {
+              &mixed[2]
+            } else {
+              &[]
+            },
+          ],
+        )),
+        vec![false, true],
+        "{phase:?}, malformed round {malformed_round}"
+      );
+    }
+  }
 }
 
 #[test]

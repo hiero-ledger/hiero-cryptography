@@ -416,12 +416,14 @@ where
       ));
     }
 
-    for (i, r) in round2.iter().enumerate() {
-      if Self::commit_nonce(&r.nonce_point) != round1[i] {
-        return Err(WrapsError::invalid_input(format!(
-          "signer {i}: the round-2 nonce does not open its round-1 commitment"
-        )));
-      }
+    // Flags follow the round messages, with one entry per selected signer.
+    let valid_messages: Vec<bool> = round1
+      .iter()
+      .zip(round2)
+      .map(|(commitment, opening)| Self::commit_nonce(&opening.nonce_point) == *commitment)
+      .collect();
+    if valid_messages.contains(&false) {
+      return Err(WrapsError::invalid_messages(valid_messages));
     }
 
     let nonce_points = round2.iter().map(|m| m.nonce_point).collect::<Vec<_>>();
@@ -493,19 +495,18 @@ where
     let e = Self::challenge(pc, msg, public_keys, round1, round2)?;
     let e_scalar = field_switch::<E::Base, E::Scalar>(e);
 
-    for (i, partial) in round3.iter().enumerate() {
-      let partial = &partial.partial_signature;
-      if partial.e != e {
-        return Err(WrapsError::invalid_input(format!(
-          "signer {i}: partial signature answers a different challenge"
-        )));
-      }
-      // The single-signer verification equation, restricted to this share.
-      if E::GE::gen() * partial.s - public_keys[i] * e_scalar != round2[i].nonce_point {
-        return Err(WrapsError::invalid_input(format!(
-          "signer {i}: partial signature does not verify against its own nonce and key"
-        )));
-      }
+    let valid_messages: Vec<bool> = round3
+      .iter()
+      .enumerate()
+      .map(|(i, partial)| {
+        let partial = &partial.partial_signature;
+        // Check the shared challenge and the single-signer verification equation.
+        partial.e == e
+          && E::GE::gen() * partial.s - public_keys[i] * e_scalar == round2[i].nonce_point
+      })
+      .collect();
+    if valid_messages.contains(&false) {
+      return Err(WrapsError::invalid_messages(valid_messages));
     }
 
     let s = round3

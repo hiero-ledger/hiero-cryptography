@@ -226,6 +226,18 @@ public class WRAPSLibraryBridge {
      * @param round1Messages Messages collected from prior rounds.
      * @param round2Messages Messages collected from prior rounds.
      * @param round3Messages Messages collected from prior rounds.
+     * @param validMessages an output boolean array that the caller must initialize with all `true`.
+     *                      The method will mark entries as `false` if it detects an invalid round message
+     *                      from the signer at that round-message index. The array must have one entry
+     *                      per `true` in `signers`, in the same order as the round messages.
+     *                      For R1, which consumes no round messages, the array must be empty.
+     *                      The flags identify offenders detected by this call: `false` marks a detected
+     *                      offender; `true` means not flagged. Validation stops at the first failing stage:
+     *                      decoding, commitment openings, then partial signatures. An offender whose
+     *                      invalid message would be caught by a later stage can therefore still have a
+     *                      `true` entry. For example, a decoding failure prevents partial-signature checks,
+     *                      leaving signers with invalid partial signatures unflagged.
+     *                      Therefore, this array only identifies a subset of offenders.
      * @return either a round message for R1...R3, or a signature for Aggregate
      */
     public byte[] runSigningProtocolPhase(
@@ -239,7 +251,8 @@ public class WRAPSLibraryBridge {
             boolean[] signers,
             byte[][] round1Messages,
             byte[][] round2Messages,
-            byte[][] round3Messages) {
+            byte[][] round3Messages,
+            boolean[] validMessages) {
         if (phase == null || messageToSign == null) {
             return null;
         }
@@ -256,6 +269,9 @@ public class WRAPSLibraryBridge {
         }
         if (signers == null) {
             signers = EMPTY_BOOLEAN_ARRAY;
+        }
+        if (validMessages == null) {
+            validMessages = EMPTY_BOOLEAN_ARRAY;
         }
         if (round1Messages == null) {
             round1Messages = EMPTY_BYTE_ARRAY_2;
@@ -276,6 +292,11 @@ public class WRAPSLibraryBridge {
         if (signers.length != schnorrPublicKeys.length) {
             return null;
         }
+        for (boolean validMessage : validMessages) {
+            if (!validMessage) {
+                return null;
+            }
+        }
 
         // Round messages only come from the actual signers:
         int numOfActualSigners = 0;
@@ -291,6 +312,9 @@ public class WRAPSLibraryBridge {
                 }
                 numOfActualSigners++;
             }
+        }
+        if (validMessages.length != numOfActualSigners) {
+            return null;
         }
         if (schnorrPublicKeys.length != 0 && numOfActualSigners > schnorrPublicKeys.length) {
             return null;
@@ -375,7 +399,8 @@ public class WRAPSLibraryBridge {
                 signers,
                 round1Messages,
                 round2Messages,
-                round3Messages);
+                round3Messages,
+                validMessages);
     }
 
     private native byte[] runSigningProtocolPhaseImpl(
@@ -389,7 +414,8 @@ public class WRAPSLibraryBridge {
             boolean[] signers,
             byte[][] round1Messages,
             byte[][] round2Messages,
-            byte[][] round3Messages);
+            byte[][] round3Messages,
+            boolean[] validMessages);
 
     /**
      * Verifies an aggregated Schnorr signature against the supplied public keys.

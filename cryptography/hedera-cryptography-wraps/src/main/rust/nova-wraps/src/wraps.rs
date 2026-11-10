@@ -399,24 +399,19 @@ fn decode_rotation_message(bytes: &[u8]) -> Result<RotationMessage<E2>, WrapsErr
   decode(bytes).map_err(|e| WrapsError::invalid_input(format!("invalid rotation message: {e}")))
 }
 
-/// Decode an expected round and retain the sender's position in the signing subset.
+/// Decode every sender, retaining positions even when a payload is malformed.
 fn decode_round_messages<T>(
   messages: &[SigningProtocolMessage],
-  round: &str,
   payload: impl Fn(RoundMessage<E2>) -> Option<T>,
-) -> Result<Vec<T>, WrapsError> {
+  valid_messages: &mut [bool],
+) -> Vec<Option<T>> {
   messages
     .iter()
     .enumerate()
     .map(|(i, bytes)| {
-      let message = decode::<RoundMessage<E2>>(bytes).map_err(|e| {
-        WrapsError::invalid_input(format!("invalid {round} message from signer {i}: {e}"))
-      })?;
-      payload(message).ok_or_else(|| {
-        WrapsError::invalid_input(format!(
-          "{round} message from signer {i} has the wrong round tag"
-        ))
-      })
+      let decoded = decode::<RoundMessage<E2>>(bytes).ok().and_then(&payload);
+      valid_messages[i] &= decoded.is_some();
+      decoded
     })
     .collect()
 }
@@ -532,6 +527,17 @@ impl WRAPS {
   ///
   /// The round slices contain the bytes returned as `ProtocolMessage`, in signing-subset
   /// order. This method checks their round tags, decodes them, and validates the transcript.
+  /// Invalid messages return [`WrapsError::InvalidMessages`] with a `valid_messages` vector
+  /// with one entry per selected signer, in round-message order. The flags identify
+  /// offenders detected by this call: `false` marks a detected offender; `true` means
+  /// not flagged. Validation stops at the first failing stage: decoding, commitment
+  /// openings, then partial signatures. An offender whose invalid message would be
+  /// caught by a later stage can therefore still have a `true` flag. For example, a
+  /// decoding failure prevents partial-signature checks, leaving signers with invalid
+  /// partial signatures unflagged.
+  /// Therefore, this array only identifies a subset of offenders.
+  /// Other errors do not accuse any sender.
+  /// A retry must use fresh entropy, including when retrying with a smaller signing subset.
   #[allow(clippy::too_many_arguments)]
   pub fn signing_protocol(
     phase: SigningProtocolPhase,
@@ -573,19 +579,40 @@ impl WRAPS {
     )?;
     let message = decode_rotation_message(message_to_sign.as_ref())?;
 
-    // Unused round lists are empty after phase validation, so they decode to empty vectors.
-    let round1 = decode_round_messages(round1_messages, "round-1", |message| match message {
-      RoundMessage::Round1(payload) => Some(payload),
-      _ => None,
-    })?;
-    let round2 = decode_round_messages(round2_messages, "round-2", |message| match message {
-      RoundMessage::Round2(payload) => Some(payload),
-      _ => None,
-    })?;
-    let round3 = decode_round_messages(round3_messages, "round-3", |message| match message {
-      RoundMessage::Round3(payload) => Some(payload),
-      _ => None,
-    })?;
+    // Decode all supplied rounds before returning so independent malformed messages
+    // are all reported, including messages from different rounds.
+    let mut valid_messages = vec![true; participants.len()];
+    let round1 = decode_round_messages(
+      round1_messages,
+      |message| match message {
+        RoundMessage::Round1(payload) => Some(payload),
+        _ => None,
+      },
+      &mut valid_messages,
+    );
+    let round2 = decode_round_messages(
+      round2_messages,
+      |message| match message {
+        RoundMessage::Round2(payload) => Some(payload),
+        _ => None,
+      },
+      &mut valid_messages,
+    );
+    let round3 = decode_round_messages(
+      round3_messages,
+      |message| match message {
+        RoundMessage::Round3(payload) => Some(payload),
+        _ => None,
+      },
+      &mut valid_messages,
+    );
+
+    if valid_messages.contains(&false) {
+      return Err(WrapsError::invalid_messages(valid_messages));
+    }
+    let round1 = round1.into_iter().map(Option::unwrap).collect::<Vec<_>>();
+    let round2 = round2.into_iter().map(Option::unwrap).collect::<Vec<_>>();
+    let round3 = round3.into_iter().map(Option::unwrap).collect::<Vec<_>>();
 
     match phase {
       SigningProtocolPhase::R1 => {

@@ -63,6 +63,12 @@ public class WRAPSLibraryBridgeTest {
         public long[] nodeIds() {
             return nodes.stream().mapToLong(Node::nodeId).toArray();
         }
+
+        public boolean[] allTrue() {
+            boolean[] result = new boolean[nodes.size()];
+            Arrays.fill(result, true);
+            return result;
+        }
     }
 
     // A helper assertion that also prints entire arrays in addition to the default first mismatching index only
@@ -133,7 +139,8 @@ public class WRAPSLibraryBridgeTest {
                         null,
                         EMPTY_BYTE_ARRAY_2,
                         EMPTY_BYTE_ARRAY_2,
-                        EMPTY_BYTE_ARRAY_2))
+                        EMPTY_BYTE_ARRAY_2,
+                        null))
                 .toList();
         final byte[][] round1Array = listToArray(round1);
 
@@ -149,7 +156,8 @@ public class WRAPSLibraryBridgeTest {
                         signers,
                         round1Array,
                         EMPTY_BYTE_ARRAY_2,
-                        EMPTY_BYTE_ARRAY_2))
+                        EMPTY_BYTE_ARRAY_2,
+                        network.allTrue()))
                 .toList();
         final byte[][] round2Array = listToArray(round2);
 
@@ -165,7 +173,8 @@ public class WRAPSLibraryBridgeTest {
                         signers,
                         round1Array,
                         round2Array,
-                        EMPTY_BYTE_ARRAY_2))
+                        EMPTY_BYTE_ARRAY_2,
+                        network.allTrue()))
                 .toList();
         final byte[][] round3Array = listToArray(round3);
 
@@ -180,7 +189,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 round1Array,
                 round2Array,
-                round3Array);
+                round3Array,
+                network.allTrue());
 
         return new SigningProtocolOutput(signature, List.of(round1, round2, round3));
     }
@@ -284,7 +294,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 listToArray(output.roundMessages.get(0)),
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
     }
 
     @Test
@@ -309,7 +320,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 null,
@@ -321,7 +333,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 new byte[0],
@@ -333,7 +346,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 new byte[] {1},
@@ -345,7 +359,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -357,7 +372,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -369,7 +385,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -381,7 +398,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -393,7 +411,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -405,7 +424,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -417,7 +437,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R1,
                 node.seed(),
@@ -429,7 +450,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
 
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
@@ -442,7 +464,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -454,7 +477,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -466,7 +490,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -478,7 +503,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 null,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -490,7 +516,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -502,7 +529,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}, new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -514,7 +542,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R2,
                 node.seed(),
@@ -526,7 +555,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
 
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
@@ -539,7 +569,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -551,7 +582,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -563,7 +595,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -575,7 +608,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -587,7 +621,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}, new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -599,7 +634,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -611,7 +647,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}, new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.R3,
                 node.seed(),
@@ -623,7 +660,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
 
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
@@ -636,7 +674,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -648,7 +687,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -660,7 +700,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -672,7 +713,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -684,7 +726,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -696,7 +739,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 EMPTY_BYTE_ARRAY_2,
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -708,7 +752,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}, new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -720,7 +765,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 EMPTY_BYTE_ARRAY_2,
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -732,7 +778,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}, new byte[] {1}},
-                new byte[][] {new byte[] {1}}));
+                new byte[][] {new byte[] {1}},
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -744,7 +791,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                EMPTY_BYTE_ARRAY_2));
+                EMPTY_BYTE_ARRAY_2,
+                network.allTrue()));
         assertNull(WRAPS.runSigningProtocolPhase(
                 WRAPSLibraryBridge.SigningProtocolPhase.Aggregate,
                 null,
@@ -756,7 +804,8 @@ public class WRAPSLibraryBridgeTest {
                 signers,
                 new byte[][] {new byte[] {1}},
                 new byte[][] {new byte[] {1}},
-                new byte[][] {new byte[] {1}, new byte[] {1}}));
+                new byte[][] {new byte[] {1}, new byte[] {1}},
+                network.allTrue()));
     }
 
     @Test

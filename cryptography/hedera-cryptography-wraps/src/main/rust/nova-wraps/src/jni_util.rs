@@ -74,8 +74,9 @@ pub fn build_entropy_array(env: &JNIEnv, random_array: &JByteArray) -> Result<[u
     Ok(random_arr)
 }
 
-/// Creates a Vec<T: DeserializeOwned> out of a Java byte[][] by deserializing objects. Nulls produce errors.
-pub fn build_vector<T: DeserializeOwned>(env: &mut JNIEnv, java_array: &JObjectArray) -> Result<Vec<T>, ()> {
+/// Deserializes a Java byte[][], preserving positions with T::default() for malformed entries.
+/// For round messages, the default is empty and WRAPS flags it as invalid. Nulls and JNI errors abort.
+pub fn build_vector<T: DeserializeOwned + Default>(env: &mut JNIEnv, java_array: &JObjectArray) -> Result<Vec<T>, ()> {
     let len = match env.get_array_length(java_array) {
         Ok(len) => len,
         Err(_) => return Result::Err(())
@@ -92,12 +93,12 @@ pub fn build_vector<T: DeserializeOwned>(env: &mut JNIEnv, java_array: &JObjectA
             return Result::Err(());
         }
 
-        let obj: T = match deserialize_from_jbyte_array(env, &JByteArray::from(jobj)) {
+        let bytes = match env.convert_byte_array(JByteArray::from(jobj)) {
             Ok(val) => val,
             Err(_) => return Result::Err(())
         };
 
-        vec.push(obj);
+        vec.push(decode::<T>(&bytes).unwrap_or_default());
     }
 
     Ok(vec)
@@ -147,8 +148,8 @@ pub fn build_address_book(
 }
 
 /// Converts a JBooleanArray into a Vec<bool>
-pub fn jboolean_array_to_vec(env: &JNIEnv, boolean_jarray: JBooleanArray) -> Result<Vec<bool>, ()> {
-    let num = match env.get_array_length(&boolean_jarray) {
+pub fn jboolean_array_to_vec(env: &JNIEnv, boolean_jarray: &JBooleanArray) -> Result<Vec<bool>, ()> {
+    let num = match env.get_array_length(boolean_jarray) {
         Ok(len) => len as usize,
         Err(_) => return Result::Err(())
     };

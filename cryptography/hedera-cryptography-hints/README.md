@@ -44,6 +44,9 @@ Steps 1–4 run once per roster, steps 5–8 once per message.
 | 7    | aggregator           | `aggregate(&crs, &ak, &vk, &sigs)` → `π`; `sigs` maps `i → σ_i`                  | `aggregateSignatures(crs, ak, vk, ids, sigs)`                    |
 | 8    | verifier             | `verify(msg, &vk, &π, (num, den))`                                               | `verifyAggregate(π, msg, vk, num, den)`; the 3-arg form uses 1/2 |
 
+A party without a hint goes into `preprocess` with hint `None` (`null` in Java). It cannot
+sign, but its weight counts toward the total that `verify`'s threshold is a fraction of.
+
 `preprocess` is deterministic, so nodes with the same inputs derive the same keys;
 `aggregate` is too, so one signer set yields one `π`. A verifier needs only `vk` (1096
 bytes), `msg` and `π` (1248 bytes). `it_works` in `hints.rs` runs this sequence in Rust;

@@ -184,12 +184,15 @@ public class HintsLibraryBridge {
      * This is needed so that the verifyAggregate() method can consider the proper signing threshold when verifying
      * an aggregate signature.
      * <p>
+     * NOTE: a party without a hinTS key may be passed with a null key. It cannot sign, but its weight still counts
+     * toward the total weight, and so toward the threshold that verifyAggregate() checks.
+     * <p>
      * NOTE: the maximum number of parties is equal to n-1. E.g. if n is equal to 4, then the parties, hintsPublicKeys, and
      * weights can contain at most 3 elements. Otherwise, the HinTS algorithms won't produce correct results.
      *
      * @param crs the CRS object
      * @param parties the party ids for the indices in hintsPublicKeys and weights
-     * @param hintsPublicKeys the valid hinTS keys by party id
+     * @param hintsPublicKeys the valid hinTS keys by party id, or null for a party without one
      * @param weights the weights by party id
      * @param n the power-of-two domain size, including the reserved final slot
      * @return the preprocessed keys
@@ -213,7 +216,8 @@ public class HintsLibraryBridge {
             if (!validatePartyId(parties[i], n)) {
                 return null;
             }
-            if (hintsPublicKeys[i] == null || weights[i] < 0) {
+            // a null hinTS key is allowed; see the note above
+            if (weights[i] < 0) {
                 return null;
             }
         }

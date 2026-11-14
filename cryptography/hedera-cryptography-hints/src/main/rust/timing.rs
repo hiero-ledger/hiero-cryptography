@@ -53,8 +53,8 @@ fn timing_aggregate_and_verify() {
         let sks: Vec<_> = (0..n - 1)
             .map(|i| HinTS::keygen([i as u8 + 1; 32]).unwrap())
             .collect();
-        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> = (0..n - 1)
-            .map(|i| (i, (F::from(1 + i as u64), HinTS::hint_gen(&crs, n, i, &sks[i]).unwrap())))
+        let signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> = (0..n - 1)
+            .map(|i| (i, (F::from(1 + i as u64), Some(HinTS::hint_gen(&crs, n, i, &sks[i]).unwrap()))))
             .collect();
         let (vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
 

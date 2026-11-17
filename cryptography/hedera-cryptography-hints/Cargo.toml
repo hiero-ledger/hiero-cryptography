@@ -38,4 +38,7 @@ zeroize = "1.8"
 
 # Above, we use ark-bls12-381 in hinTS and WRAPS in order to interact with the rest of the ark ecosystem.
 # But when exposing native BLS APIs directly, we prefer to use blst because it's faster and more secure:
-blst = "0.3.17"
+# `portable` makes blst compile both its baseline and ADX/BMI2 x86_64 assembly and pick one at run time.
+# Without it, blst compiles only the variant the build machine's CPU supports, and a library built on an
+# ADX-capable machine dies with SIGILL on a host without ADX.
+blst = { version = "0.3.17", features = ["portable"] }

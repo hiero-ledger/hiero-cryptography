@@ -471,11 +471,13 @@ impl HinTS {
     }
 
     /// preprocesses all signers' extended public keys and weights,
-    /// and outputs the network's verification key and aggregation key
+    /// and outputs the network's verification key and aggregation key;
+    /// a party without an extended public key (None) cannot sign, but
+    /// its weight still counts toward the total weight
     pub fn preprocess(
         n: usize,
         crs: &CRS,
-        signer_info: &HashMap<usize, (Weight, ExtendedPublicKey)>,
+        signer_info: &HashMap<usize, (Weight, Option<ExtendedPublicKey>)>,
     ) -> Result<(VerificationKey, AggregationKey), HinTSError> {
         // sanity check on the inputs
 
@@ -508,7 +510,7 @@ impl HinTS {
         let mut weights: Vec<Weight> = Vec::new();
         let mut epks: Vec<ExtendedPublicKey> = Vec::new();
         for i in 0..n {
-            if let Some((weight, hint)) = signer_info.get(&i) {
+            if let Some((weight, Some(hint))) = signer_info.get(&i) {
                 if hint.n != n {
                     return Err(HinTSError::InvalidInput(
                         format!("Invalid hint: got hint.n = {}, expected n = {}", hint.n, n))
@@ -522,6 +524,8 @@ impl HinTS {
                 weights.push(*weight);
                 epks.push(hint.clone());
             } else {
+                // absent, or present without a hint: either way the slot gets no signing weight,
+                // since any aggregator could set the bit of a weighted slot with the identity key
                 weights.push(F::from(0));
                 let zero = F::from(0);
                 let zero_sk = SecretKey {
@@ -561,7 +565,8 @@ impl HinTS {
             )
         )?;
 
-        let total_weight = weights.iter().fold(F::from(0), |acc, &x| acc + x);
+        // every party counts toward the total, including those without a hint, which can never sign
+        let total_weight = signer_info.values().fold(F::from(0), |acc, (weight, _)| acc + weight);
 
         let vk = VerificationKey {
             n: n,
@@ -1520,8 +1525,8 @@ mod tests {
         let weights = sample_weights(num_signers);
 
         // -------------- perform universe setup ---------------
-        let signers_info: HashMap<usize, (Weight, ExtendedPublicKey)> = (0..num_signers)
-            .map(|i| (i, (weights[i], epks[i].clone())))
+        let signers_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> = (0..num_signers)
+            .map(|i| (i, (weights[i], Some(epks[i].clone()))))
             .collect();
 
         //run universe setup
@@ -1591,7 +1596,7 @@ mod tests {
             for signers in [universe_n - 1, 0, universe_n / 2] {
                 let mut signer_info = HashMap::new();
                 for i in 0..signers {
-                    signer_info.insert(i, (weights[i], epks[i].clone()));
+                    signer_info.insert(i, (weights[i], Some(epks[i].clone())));
                 }
 
                 let (_vk, ak) = HinTS::preprocess(universe_n, &crs, &signer_info)
@@ -1625,12 +1630,60 @@ mod tests {
 
         // sanity: the same single-signer shape on a normal index is accepted
         let mut ok = HashMap::new();
-        ok.insert(0usize, (weights[0], epks[0].clone()));
+        ok.insert(0usize, (weights[0], Some(epks[0].clone())));
         assert!(HinTS::preprocess(n, &crs, &ok).is_ok());
 
         let mut bad = HashMap::new();
-        bad.insert(n - 1, (weights[0], reserved_epk));
+        bad.insert(n - 1, (weights[0], Some(reserved_epk)));
         assert!(HinTS::preprocess(n, &crs, &bad).is_err());
+
+        // a party without a hint is held to the same bound
+        bad.insert(n - 1, (weights[0], None));
+        assert!(HinTS::preprocess(n, &crs, &bad).is_err());
+    }
+
+    /// A party without a hint counts toward the total weight but can never sign: its slot gets
+    /// no weight in W and the identity key, like an absent party's. With issue #793's vector
+    /// (the parties with hints weigh 18, the whole roster 20), 10 then falls short of a
+    /// majority, as it would not against the 18 alone, and 11 makes one.
+    #[test]
+    fn test_party_without_hint_counts_toward_total_weight_only() {
+        let n = 8;
+        let msg = b"no hint";
+        let (crs, _ak, _vk, sks, epks) = sample_universe(n);
+        let majority = (F::from(1), F::from(2));
+
+        let mut signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> = [10u64, 1, 7]
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| (i, (F::from(w), Some(epks[i].clone()))))
+            .collect();
+        let (vk_18, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
+        let no_hint = 3;
+        signer_info.insert(no_hint, (F::from(2), None));
+        let (vk_20, ak_20) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
+
+        // the aggregation key is unchanged, and the verification key differs only in its total
+        assert_eq!(ak_20, ak);
+        assert_eq!(vk_20, VerificationKey { total_weight: F::from(20), ..vk_18.clone() });
+
+        let aggregate = |vk: &VerificationKey, sigs: &HashMap<usize, PartialSignature>| {
+            HinTS::aggregate(&crs, &ak, vk, sigs).unwrap()
+        };
+        let ten = sign_all(msg, &sks, [0]);
+        let eleven = sign_all(msg, &sks, [0, 1]);
+        assert!(HinTS::verify(msg, &vk_18, &aggregate(&vk_18, &ten), majority).unwrap());
+        assert!(!HinTS::verify(msg, &vk_20, &aggregate(&vk_20, &ten), majority).unwrap());
+        assert!(HinTS::verify(msg, &vk_20, &aggregate(&vk_20, &eleven), majority).unwrap());
+
+        // nor can an aggregator claim its weight: with its bit set, and the identity signature
+        // that its identity key accepts, the signature is valid but still weighs 10
+        let mut claimed = ten.clone();
+        claimed.insert(no_hint, G2AffinePoint::zero());
+        let π = aggregate(&vk_20, &claimed);
+        assert_eq!(π.agg_weight, F::from(10));
+        assert!(HinTS::verify(msg, &vk_20, &π, (F::from(0), F::from(1))).unwrap());
+        assert!(!HinTS::verify(msg, &vk_20, &π, majority).unwrap());
     }
 
     /// An empty batch used to report success: add() gives the identity in both groups, so the
@@ -1664,8 +1717,8 @@ mod tests {
 
         // only parties 0 to 3 register, so slots 4 to 6 hold the identity key
         let weights = sample_weights(n);
-        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
-            (0..4).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> =
+            (0..4).map(|i| (i, (weights[i], Some(epks[i].clone())))).collect();
         let (_vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
         let absent = 4;
         assert!(ak.pks[absent].is_zero());
@@ -2090,8 +2143,8 @@ mod tests {
         // party 0 has no weight; everyone else carries the network
         let mut weights = sample_weights(n - 1);
         weights[0] = F::from(0);
-        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
-            (0..n - 1).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> =
+            (0..n - 1).map(|i| (i, (weights[i], Some(epks[i].clone())))).collect();
         let (vk, ak) = HinTS::preprocess(n, &crs, &signer_info).unwrap();
 
         // sanity: an honest signature that includes the zero-weight party still verifies
@@ -2241,8 +2294,8 @@ mod tests {
         let msg = b"mismatch";
         let (crs, ak, _vk, sks, epks) = sample_universe(8);
         let weights: Vec<F> = (0..7).map(|i| F::from(100 + i as u64)).collect();
-        let signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> =
-            (0..7).map(|i| (i, (weights[i], epks[i].clone()))).collect();
+        let signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> =
+            (0..7).map(|i| (i, (weights[i], Some(epks[i].clone())))).collect();
         let (other_vk, _other_ak) = HinTS::preprocess(8, &crs, &signer_info).unwrap();
 
         let sigs = sign_all(msg, &sks, 0..7);

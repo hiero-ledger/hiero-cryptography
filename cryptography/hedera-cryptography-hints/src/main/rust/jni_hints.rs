@@ -132,22 +132,28 @@ pub unsafe extern "system" fn Java_com_hedera_cryptography_hints_HintsLibraryBri
             Err(_) => return std::ptr::null_mut()
         };
 
-        let mut hints_array:Vec<ExtendedPublicKey> = Vec::with_capacity(num_of_keys as usize);
+        let mut hints_array:Vec<Option<ExtendedPublicKey>> = Vec::with_capacity(num_of_keys as usize);
         for i in 0..num_of_keys as usize {
             let jobj = match env.get_object_array_element(&hints_jarray, i as jsize) {
                 Ok(val) => val,
                 Err(_) => return std::ptr::null_mut()
             };
 
+            // a null hint is a party without one, whose weight counts toward the total only
+            if jobj.is_null() {
+                hints_array.push(None);
+                continue;
+            }
+
             let hints: ExtendedPublicKey = match jni_util::deserialize_jbyte_array(&env, &JByteArray::from(jobj)) {
                 Ok(val) => val,
                 Err(_) => return std::ptr::null_mut()
             };
 
-            hints_array.push(hints);
+            hints_array.push(Some(hints));
         }
 
-        let mut signer_info: HashMap<usize, (Weight, ExtendedPublicKey)> = HashMap::with_capacity(num_of_keys as usize);
+        let mut signer_info: HashMap<usize, (Weight, Option<ExtendedPublicKey>)> = HashMap::with_capacity(num_of_keys as usize);
         for i in 0..num_of_keys as usize {
             signer_info.insert(keys[i] as usize, (Weight::from(weights[i] as i64), hints_array[i].clone()));
         }

@@ -279,8 +279,6 @@ public class HintsLibraryBridgeTest {
         assertNull(INSTANCE.preprocess(
                 crs, new int[] {0, 1, 4}, new byte[][] {hints0, hints1, hints2}, new long[] {111, 1, 222}, 4));
         assertNull(INSTANCE.preprocess(
-                crs, new int[] {0, 1, 2}, new byte[][] {null, hints1, hints2}, new long[] {111, 1, 222}, 4));
-        assertNull(INSTANCE.preprocess(
                 crs, new int[] {0, 1, 2}, new byte[][] {hints0, hints1, hints2}, new long[] {111, -1, 222}, 4));
 
         // corrupt the CRS
@@ -318,6 +316,41 @@ public class HintsLibraryBridgeTest {
         // and finally do a sanity check:
         assertNotNull(INSTANCE.preprocess(
                 crs, new int[] {0, 1, 2}, new byte[][] {hints0, hints1, hints2}, new long[] {111, 1, 222}, 4));
+    }
+
+    @Test
+    void testPreprocessPartyWithoutHint() {
+        final byte[] crs = initAndUpdateCRS((short) 8);
+        final byte[] message = HintsConstants.RANDOM_2;
+
+        final byte[] secretKey0 = INSTANCE.generateSecretKey(HintsConstants.RANDOM_0);
+        final byte[] hints0 = INSTANCE.computeHints(crs, secretKey0, 0, 8);
+        final byte[] signature0 = INSTANCE.signBls(message, secretKey0);
+
+        final byte[] secretKey1 = INSTANCE.generateSecretKey(HintsConstants.RANDOM_1);
+        final byte[] hints1 = INSTANCE.computeHints(crs, secretKey1, 1, 8);
+        final byte[] signature1 = INSTANCE.signBls(message, secretKey1);
+
+        final byte[] secretKey2 = INSTANCE.generateSecretKey(HintsConstants.RANDOM_2);
+        final byte[] hints2 = INSTANCE.computeHints(crs, secretKey2, 2, 8);
+
+        // party 3 has no hint: it cannot sign, but its weight of 2 brings the total from 18 to 20
+        final AggregationAndVerificationKeys keys = INSTANCE.preprocess(
+                crs, new int[] {0, 1, 2, 3}, new byte[][] {hints0, hints1, hints2, null}, new long[] {10, 1, 7, 2}, 8);
+        assertNotNull(keys);
+
+        // a weight of 10 makes a valid signature, but not one with more than half of 20
+        final byte[] ten = INSTANCE.aggregateSignatures(
+                crs, keys.aggregationKey(), keys.verificationKey(), new int[] {0}, new byte[][] {signature0});
+        assertTrue(INSTANCE.verifyAggregate(ten, message, keys.verificationKey(), 1, 3));
+        assertFalse(INSTANCE.verifyAggregate(ten, message, keys.verificationKey()));
+
+        // a weight of 11 does
+        final byte[] eleven = INSTANCE.aggregateSignatures(
+                crs, keys.aggregationKey(), keys.verificationKey(), new int[] {0, 1}, new byte[][] {
+                    signature0, signature1
+                });
+        assertTrue(INSTANCE.verifyAggregate(eleven, message, keys.verificationKey()));
     }
 
     @Test

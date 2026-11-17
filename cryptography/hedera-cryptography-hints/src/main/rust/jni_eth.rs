@@ -190,3 +190,22 @@ fn verify_signers(signers: &blst_p1, message: &[u8], signature: &blst_p2_affine)
         ) == BLST_ERROR::BLST_SUCCESS
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blst::min_pk::SecretKey;
+
+    // CI runs this on an emulated x86-64 CPU without ADX. It dies with SIGILL there unless blst keeps its
+    // `portable` feature, which picks its baseline code at run time on such CPUs.
+    #[test]
+    fn test_validate_g1_eip2537_public_keys() {
+        let public_key = SecretKey::key_gen(&[1u8; 32], &[]).unwrap().sk_to_pk().serialize();
+        let mut encoded = Vec::new();
+        for coordinate in public_key.chunks(FP_LENGTH_BYTES) {
+            encoded.extend_from_slice(&[0u8; EIP2537_FP_PADDING_LENGTH_BYTES]);
+            encoded.extend_from_slice(coordinate);
+        }
+        assert!(validate_g1_eip2537_public_keys(&[encoded]));
+    }
+}

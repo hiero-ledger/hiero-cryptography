@@ -132,6 +132,36 @@ jobs:
       - name: Build Native Linux / Windows
         run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64 buildXKCPLinuxAmd64 buildXKCPLinuxArm64 buildXKCPWindowsAmd64
 
+  verify_blst_non_adx:
+    # Our runners all have ADX, so run the blst tests on an emulated x86-64 CPU without it. They die with SIGILL
+    # unless blst keeps its `portable` feature.
+    name: Verify blst on x86-64 without ADX
+    runs-on: hl-crypto-lin-md
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install Rust and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential qemu-user
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Run blst tests on an emulated CPU without ADX
+        working-directory: cryptography/hedera-cryptography-hints
+        env:
+          # The Rust version the native libraries are built with (gradle/toolchain-versions.properties)
+          RUSTUP_TOOLCHAIN: 1.89.0
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu qemu64
+        run: cargo test --lib --target x86_64-unknown-linux-gnu jni_eth::tests
+
   build:
     name: Build TSS Crypto Library
     needs:

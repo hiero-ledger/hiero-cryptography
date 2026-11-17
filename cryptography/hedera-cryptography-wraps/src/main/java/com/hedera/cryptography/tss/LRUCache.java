@@ -7,14 +7,14 @@ import java.util.Map;
 import java.util.function.Function;
 
 /// A simple LRU cache implementation.
-class LRUCache<K, V> {
+public class LRUCache<K, V> {
     private final Map<K, V> cache = new HashMap<>();
     private final LinkedList<K> lru = new LinkedList<>();
 
     private final int size;
 
     /// Create new cache of a given size.
-    LRUCache(int size) {
+    public LRUCache(int size) {
         this.size = size;
     }
 
@@ -26,7 +26,7 @@ class LRUCache<K, V> {
 
     /// Fetches or computes a value for a key,
     /// updating the LRU order and respecting the size.
-    V get(K key, Function<K, V> computer) {
+    public V get(K key, Function<K, V> computer) {
         synchronized (cache) {
             if (cache.containsKey(key)) {
                 accessKey(key);

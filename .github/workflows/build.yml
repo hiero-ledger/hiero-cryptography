@@ -137,6 +137,8 @@ jobs:
     # unless blst keeps its `portable` feature.
     name: Verify blst on x86-64 without ADX
     runs-on: hl-crypto-lin-md
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu qemu64
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
@@ -154,13 +156,21 @@ jobs:
             | sh -s -- -y --profile minimal --default-toolchain none
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
 
+      - name: Check the emulated CPU rejects ADX
+        run: |
+          gcc -x c -o "${RUNNER_TEMP}/adx" - <<'EOF'
+          int main(void) { unsigned long a = 1; __asm__ volatile("adox %0, %0" : "+r"(a)); return 0; }
+          EOF
+          ${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER} "${RUNNER_TEMP}/adx" || status=$?
+          test "${status:-0}" -eq 132
+
       - name: Run blst tests on an emulated CPU without ADX
         working-directory: cryptography/hedera-cryptography-hints
-        env:
-          # The Rust version the native libraries are built with (gradle/toolchain-versions.properties)
-          RUSTUP_TOOLCHAIN: 1.89.0
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu qemu64
-        run: cargo test --lib --target x86_64-unknown-linux-gnu jni_eth::tests
+        run: |
+          # Test with the Rust version the native libraries are built with
+          RUSTUP_TOOLCHAIN="$(grep '^rust=' "${GITHUB_WORKSPACE}/gradle/toolchain-versions.properties" | cut -d= -f2)"
+          export RUSTUP_TOOLCHAIN
+          cargo test --lib --target x86_64-unknown-linux-gnu jni_eth::tests
 
   build:
     name: Build TSS Crypto Library

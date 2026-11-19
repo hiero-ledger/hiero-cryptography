@@ -288,7 +288,7 @@ public class TSSTest {
      * This isn't a test per se, but rather a utility to capture all the TSSTestConstants
      * used in unit tests here. It's designed to be run manually by uncommenting the
      * `@Test` annotation below. It's useless and time-expensive to keep this "test" enabled
-     * otherwise because the WRAPS proof construction would add an extra 30 minutes to the runtime.
+     * otherwise because WRAPS proof construction is slow.
      */
     // @Test
     void captureTestData() throws Exception {
@@ -353,7 +353,7 @@ public class TSSTest {
 
         System.err.println("AGGREGATE_SCHNORR_SIGNATURE = " + Arrays.toString(output0.signature()));
 
-        System.err.println("Computing proof0 which may take up to 30 minutes...");
+        System.err.println("Computing proof0 which may take up to ~1 minute...");
         final Proof proof0 = WRAPS.constructWrapsProof(
                 genesisAddressBookHash,
                 genesisNetwork.publicKeys(),

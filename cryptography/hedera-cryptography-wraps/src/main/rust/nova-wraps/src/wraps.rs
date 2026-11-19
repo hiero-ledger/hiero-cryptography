@@ -865,10 +865,9 @@ impl WRAPS {
 
     running.num_steps = running.snark.num_steps();
     running.zi = running.snark.outputs().to_vec();
-    // Reuse the proof's genesis hints hash when assembling its ledger ID.
-    // Note that this is not really the ledger_id because we use the current
-    // iteration's hints_vk rather than the genesis one. But, let us pretend
-    // because we need a ledger_id-like value for verification purposes.
+    // Reuse the proof's genesis hints hash when assembling its ledger ID. This call
+    // never sees the genesis hints key, so the hints half of the checks below holds
+    // trivially; the address-book half catches a wrong `ab_genesis_hash`.
     let not_really_ledger_id = encode(&[*ab_genesis_hash, running.z0[1]])?;
     let uncompressed = encode(&running)?;
     if !Self::verify_uncompressed_wraps_proof(
@@ -918,8 +917,8 @@ impl WRAPS {
   /// Borrows the same public parameters used for proof construction.
   ///
   /// `ledger_id` is the output of [`Self::compute_rotation_message`] on the genesis
-  /// address book and genesis hints key. Only its address-book hash is checked;
-  /// `hints_vk` supplies the expected current hints key separately.
+  /// address book and genesis hints key. The proof's initial state must equal both of
+  /// its hashes; `hints_vk` must hash to the hints half of the final state.
   pub fn verify_uncompressed_wraps_proof(
     pp: &PublicParams,
     running_proof: &Vec<u8>,
@@ -953,7 +952,8 @@ impl WRAPS {
   /// Beyond the SNARK itself this pins the two ends of the chain: it must start at
   /// the address-book hash in `ledger_id` and must currently carry `hints_vk`.
   /// `ledger_id` is the output of [`Self::compute_rotation_message`] on the genesis
-  /// address book and genesis hints key. Its hints-key component is not checked.
+  /// address book and genesis hints key. Both of its hashes must equal the proof's
+  /// initial state.
   pub fn verify_compressed_wraps_proof(
     vk: &CompressedVerifyingKey,
     proof_serialized: &Vec<u8>,

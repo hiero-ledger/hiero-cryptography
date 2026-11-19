@@ -160,10 +160,12 @@ public class WRAPSLibraryBridge {
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // DEFINITIONS BELOW MUST MATCH THEIR NATIVE CODE COUNTER-PARTS (see src/main/rust/nova-wraps/src/constants.rs):
+    // DEFINITIONS BELOW MUST MATCH THEIR NATIVE CODE COUNTER-PARTS, EXCEPT MAX_AB_SIZE (SEE ITS COMMENT):
+    // ENTROPY_SIZE matches src/main/rust/nova-wraps/src/constants.rs, and the SigningProtocolPhase ordinals
+    // match src/main/rust/nova-wraps/src/jni_wraps.rs.
     // ------------------------------------------------------------------------------------------------------
 
-    /** The maximum size of an AddressBook. */
+    /** The maximum size of an AddressBook: hinTS's `MAX_SIGNERS_NUM` (63), one below the native limit (64). */
     public static final int MAX_AB_SIZE = com.hedera.cryptography.hints.HintsLibraryBridge.MAX_SIGNERS_NUM;
 
     /** Size of a random seed. */
@@ -238,6 +240,8 @@ public class WRAPSLibraryBridge {
      *                      `true` entry. For example, a decoding failure prevents partial-signature checks,
      *                      leaving signers with invalid partial signatures unflagged.
      *                      Therefore, this array only identifies a subset of offenders.
+     *                      Null or wrong-length round messages are rejected before these checks and are
+     *                      not flagged: the method returns null and leaves this array unchanged.
      * @return either a round message for R1...R3, or a signature for Aggregate
      */
     public byte[] runSigningProtocolPhase(
@@ -458,7 +462,8 @@ public class WRAPSLibraryBridge {
             final byte[] signature);
 
     /**
-     * Computes the Poseidon hash of an address book. This is expected to only be used to compute the ledger ID.
+     * Computes the Poseidon hash of an address book. Use it as the `genesisAddressBookHash` argument of
+     * `constructWrapsProof()`; the ledger ID itself comes from `computeNetworkID()`.
      * The address book size is limited by the `MAX_AB_SIZE`.
      * @param schnorrPublicKeys Schnorr public keys for nodes in the address book
      * @param weights corresponding non-negative weights of the nodes in the address book
@@ -486,7 +491,8 @@ public class WRAPSLibraryBridge {
     private native byte[] hashAddressBookImpl(byte[][] schnorrPublicKeys, long[] weights, long[] nodeIds);
 
     /**
-     * A convenience API to compute the Poseidon hash of an arbitrary non-null and non-empty array.
+     * A convenience API to hash an arbitrary non-null and non-empty array the way WRAPS hashes a hinTS
+     * verification key: SHA-256 over `"WRAPS-hints-vk-v1" || array`, reduced into the BN254 scalar field.
      * @param array a non-null and non-empty array of bytes
      * @return a hash of the array, or null if errors occur
      */
@@ -532,10 +538,9 @@ public class WRAPSLibraryBridge {
             byte[][] schnorrPublicKeys, long[] weights, long[] nodeIds, byte[] hintsVerificationKey);
 
     /**
-     * Creates the first proof for the genesis AddressBook when both prev and next AddressBooks are the same
-     * and the tssVerificationKey is 1480 zeros, and prevProof is null.
-     * Produces both the incremental Nova proof and the compressed decider proof when the AddressBooks differ
-     * and the tssVerificationKey is real, and the prevProof is present.
+     * With a null prevProof, creates the genesis proof: prev and next must both be the genesis AddressBook.
+     * Otherwise, extends prevProof by one rotation. Every call returns both the incremental Nova proof
+     * and the compressed proof.
      * <p>
      * Note: Nova and Decider keys are managed internally in the native code for performance reasons.
      *
@@ -547,7 +552,7 @@ public class WRAPSLibraryBridge {
      * @param nextWeights weights for the next AB, or the current AB to generate initial proof
      * @param nextNodeIds nodeIds for the next AB, or the current AB to generate initial proof
      * @param prevProof previous proof, or null to generate the initial proof
-     * @param tssVerificationKey hinTS VerificationKey, or 1480 zeros to generate the initial proof
+     * @param tssVerificationKey the next AddressBook's hinTS VerificationKey (verification requires 1096 bytes)
      * @param aggregateSignature aggregate Schnorr signature on the rotation message
      * @return a Proof in both uncompressed and compressed forms as byte arrays
      */
@@ -625,7 +630,7 @@ public class WRAPSLibraryBridge {
      *
      * @param compressedProof Compressed proof bundle returned by `constructWrapsProof()`
      * @param ledgerId ledgerID as computed by `computeNetworkID()`
-     * @param tssVerificationKey hinTS VerificationKey, or 1480 zeros for the initial proof
+     * @param tssVerificationKey the current hinTS VerificationKey (1096 bytes)
      * @return true if the decider successfully verifies the proof, false if not or if errors occur
      */
     public boolean verifyCompressedProof(byte[] compressedProof, byte[] ledgerId, byte[] tssVerificationKey) {

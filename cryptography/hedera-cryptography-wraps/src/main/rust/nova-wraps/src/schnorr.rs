@@ -28,7 +28,7 @@ fn truncate_to_challenge<F: PrimeFieldBits>(x: &F) -> F {
 }
 
 // =========================================================================
-// Schnorr over `E::GE`, with Poseidon as the hash function.
+// Schnorr over `E::GE`: Poseidon for signature challenges, SHA-256 for proofs of knowledge.
 // =========================================================================
 
 // The Schnorr value types. Each is a plain projection of `E` rather than a newtype, so

@@ -104,7 +104,7 @@ pub fn build_vector<T: DeserializeOwned + Default>(env: &mut JNIEnv, java_array:
     Ok(vec)
 }
 
-/// Builds an AddressBook out of a pair of public keys and weights arrays
+/// Builds an AddressBook out of the public keys, weights, and node IDs arrays
 pub fn build_address_book(
     env: &mut JNIEnv,
     schnorr_public_keys_jarray: JObjectArray,

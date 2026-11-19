@@ -248,7 +248,7 @@ public class HintsLibraryBridge {
      *
      * @param signature the signature
      * @param message the message
-     * @param aggregationKey the extended public key
+     * @param aggregationKey the aggregation key from preprocess()
      * @param partyId the party id whose public key from the aggregationKey should be used for verifying the signature
      * @return true if the signature is valid; false otherwise
      */
@@ -274,7 +274,7 @@ public class HintsLibraryBridge {
      * Checks that a batch of signatures on a message verifies under a BLS public key.
      *
      * @param message the message
-     * @param aggregationKey the extended public key
+     * @param aggregationKey the aggregation key from preprocess()
      * @param parties the party ids for the partialSignatures array
      * @param partialSignatures the partial signatures by party id
      * @return true if the signature is valid; false otherwise

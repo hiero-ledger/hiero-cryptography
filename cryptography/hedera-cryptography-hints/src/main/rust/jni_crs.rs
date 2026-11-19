@@ -11,7 +11,7 @@ use crate::jni_util;
 /// # Arguments
 /// * `env` - The JNI environment.
 /// * `_instance` - The Java instance calling this function.
-/// * `signers_num` the number of signers
+/// * `signers_num` the CRS degree, i.e. the number of signers plus 1
 /// # Returns
 /// *   a byte array with a serialized CRS object, or null on error
 #[no_mangle]

@@ -17,7 +17,7 @@ public final class TSS {
     private static final HintsLibraryBridge HINTS = HintsLibraryBridge.getInstance();
     private static final WRAPSLibraryBridge WRAPS = WRAPSLibraryBridge.getInstance();
 
-    // WRAPS proof may take up to 300ms to compute, so we cache them because they usually stay
+    // WRAPS proof may take up to 300ms to verify, so we cache them because they usually stay
     // constant for many verifications.
 
     private record Key(byte[] abProof, byte[] ledgerId, byte[] hintsVerificationKey) {

@@ -156,7 +156,7 @@ fn threshold_sign(
 
 /// The directory holding pruned powers-of-tau files, overridable for testing.
 ///
-/// HyperKZG on the primary curve needs a universal setup, so there is no transparent
+/// Mercury on the primary curve needs a KZG universal setup, so there is no transparent
 /// fallback here. Drop `ppot_pruned_XX.ptau` files into `./params` — or point
 /// `WRAPS_PTAU_DIR` at a directory holding them. See the "Powers of tau" section of
 /// the README.
@@ -2183,8 +2183,6 @@ fn quadratic_field_rejects_each_noncanonical_component() {
 // directory holding them:
 //
 //   WRAPS_PTAU_DIR=../Nova/params cargo test --release -- --nocapture
-//
-// `params/` is git-ignored, so a fresh checkout has to supply it.
 
 /// Public parameters and a compressed verifier, reused by every simulation.
 fn wraps_setup() -> &'static (PublicParams, CompressedVerifyingKey) {

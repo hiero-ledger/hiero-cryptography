@@ -206,7 +206,7 @@ pub struct VerificationKey {
     g_0: G1AffinePoint,
     /// first G2 element from the KZG CRS (for zeroth power of tau)
     h_0: G2AffinePoint,
-    /// second G1 element from the KZG CRS (for first power of tau)
+    /// second G2 element from the KZG CRS (for first power of tau)
     h_1: G2AffinePoint,
     /// commitment to the L_{n-1} polynomial
     l_n_minus_1_of_tau_com: G1AffinePoint,
@@ -332,7 +332,7 @@ impl HinTS {
         let den = utils::compute_x_monomial();
         //qx_term = sk_i * (l_i(x) - l_i(0)) / x
         let qx_term = utils::poly_eval_mult_c(&(&num / &den), sk);
-        //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0)) / x
+        //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0))
         let qx_term_mul_tau = utils::poly_eval_mult_c(&num, sk);
         //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
         let qx_term_com = KZG::commit_g1(&crs, &qx_term)?;
@@ -453,7 +453,7 @@ impl HinTS {
 
         //qx_term = (l_i(x) - l_i(0)) / x
         let qx_term = &(&num / &den);
-        //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
+        //qx_term_com = [ (l_i(τ) - l_i(0)) / τ ]_2
         let qx_term_com = KZG::commit_g2(&crs, &qx_term)?;
         let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, crs.powers_of_h[0]);
         let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_com);
@@ -461,7 +461,7 @@ impl HinTS {
 
         //qx_term_mul_tau = (l_i(x) - l_i(0))
         let qx_term_mul_tau = &num;
-        //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_1
+        //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_2
         let qx_term_mul_tau_com = KZG::commit_g2(&crs, &qx_term_mul_tau)?;
         let lhs = <Curve as Pairing>::pairing(hint.qx_i_term_mul_tau, crs.powers_of_h[0]);
         let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_mul_tau_com);
@@ -1364,9 +1364,9 @@ pub fn serialize<T: CanonicalSerialize>(
     t: &T
 ) -> Result<Vec<u8>, HinTSError> {
     let mut buf = Vec::new();
-    // unwrap() should be safe because we serialize into a variable-size vector.
-    // However, it might fail if the `t` is invalid somehow, although this
-    // should only occur if there is an error in the caller or this library.
+    // Serializing into a variable-size vector cannot run out of space, so an error
+    // means `t` is invalid, which should only occur if there is an error in the
+    // caller or this library; it is returned to the caller.
     t.serialize_uncompressed(&mut buf)?;
     Ok(buf)
 }

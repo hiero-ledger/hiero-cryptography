@@ -132,6 +132,46 @@ jobs:
       - name: Build Native Linux / Windows
         run: ./gradlew cargoBuildX86Linux cargoBuildAarch64Linux cargoBuildX86Windows buildLibsodiumLinuxAmd64 buildLibsodiumLinuxArm64  buildLibsodiumWindowsAmd64 buildSecp256k1LinuxAmd64 buildSecp256k1LinuxArm64  buildSecp256k1WindowsAmd64 buildXKCPLinuxAmd64 buildXKCPLinuxArm64 buildXKCPWindowsAmd64
 
+  verify_blst_non_adx:
+    # Our runners all have ADX, so run the blst tests on an emulated x86-64 CPU without it. They die with SIGILL
+    # unless blst keeps its `portable` feature.
+    name: Verify blst on x86-64 without ADX
+    runs-on: hl-crypto-lin-md
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: qemu-x86_64 -cpu qemu64
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout Code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install Rust and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install build-essential qemu-user
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+
+      - name: Check the emulated CPU rejects ADX
+        run: |
+          gcc -x c -o "${RUNNER_TEMP}/adx" - <<'EOF'
+          int main(void) { unsigned long a = 1; __asm__ volatile("adox %0, %0" : "+r"(a)); return 0; }
+          EOF
+          ${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER} "${RUNNER_TEMP}/adx" || status=$?
+          test "${status:-0}" -eq 132
+
+      - name: Run blst tests on an emulated CPU without ADX
+        working-directory: cryptography/hedera-cryptography-hints
+        run: |
+          # Test with the Rust version the native libraries are built with
+          RUSTUP_TOOLCHAIN="$(grep '^rust=' "${GITHUB_WORKSPACE}/gradle/toolchain-versions.properties" | cut -d= -f2)"
+          export RUSTUP_TOOLCHAIN
+          cargo test --lib --target x86_64-unknown-linux-gnu jni_eth::tests
+
   build:
     name: Build TSS Crypto Library
     needs:

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 val junit5 = "6.1.3"
 val mockito = "5.24.0"
-val bouncycastle = "1.86"
+val bouncycastle = "1.87"
 
 dependencies.constraints {
     api("org.junit.jupiter:junit-jupiter-api:$junit5") { because("org.junit.jupiter.api") }
@@ -12,7 +12,7 @@ dependencies.constraints {
 
     // Tests/JMH only:
     api("com.goterl:lazysodium-java:5.2.0") { because("com.goterl.lazysodium") }
-    api("com.hedera.pbj:pbj-runtime:0.16.4") { because("com.hedera.pbj.runtime") }
+    api("com.hedera.pbj:pbj-runtime:0.16.5") { because("com.hedera.pbj.runtime") }
     api("org.hyperledger.besu:secp256k1:1.4.2") {
         because("org.hyperledger.besu.nativelib.secp256k1")
     }
